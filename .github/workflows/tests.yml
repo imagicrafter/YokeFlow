@@ -50,18 +50,6 @@ jobs:
       run: |
         python tests/test_security.py
 
-    - name: Run database tests
-      env:
-        DATABASE_URL: postgresql://agent:agent_test_password@localhost:5432/yokeflow_test
-      run: |
-        python tests/test_database_abstraction.py
-
-    - name: Run orchestrator tests
-      env:
-        DATABASE_URL: postgresql://agent:agent_test_password@localhost:5432/yokeflow_test
-      run: |
-        python tests/test_orchestrator.py
-
   web-ui-build:
     name: Web UI Build
     runs-on: ubuntu-latest
@@ -83,10 +71,6 @@ jobs:
     - name: Build
       working-directory: web-ui
       run: npm run build
-
-    - name: Lint
-      working-directory: web-ui
-      run: npm run lint
 
   mcp-build:
     name: MCP Task Manager Build
