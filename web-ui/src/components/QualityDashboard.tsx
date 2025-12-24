@@ -16,7 +16,7 @@ import axios from 'axios';
 import { api } from '@/lib/api';
 import { SessionQualityBadge, QualityLegend } from './SessionQualityBadge';
 import { TestCoverageReport } from './TestCoverageReport';
-import { TrendingUp, CheckCircle, Eye, Download } from 'lucide-react';
+import { TrendingUp, CheckCircle, Eye, Download, AlertTriangle } from 'lucide-react';
 
 const API_BASE = process.env.NEXT_PUBLIC_API_URL || 'http://localhost:8000';
 
@@ -400,9 +400,10 @@ export function QualityDashboard({ projectId }: QualityDashboardProps) {
                         </div>
                       </button>
                       <button
-                        onClick={() => downloadReview(session.session_number, session.review_text)}
+                        onClick={() => downloadReview(session.session_number, session.review_text || '')}
                         className="flex items-center gap-1 px-3 py-1.5 text-xs text-blue-400 hover:text-blue-300 hover:bg-blue-500/10 rounded transition-colors"
                         title="Download review as markdown"
+                        disabled={!session.review_text}
                       >
                         <Download className="w-4 h-4" />
                         <span>Download</span>

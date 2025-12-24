@@ -1,7 +1,7 @@
 #!/usr/bin/env node
 /**
  * MCP Server for Task Management
- * Provides structured task management capabilities for autonomous coding agents
+ * Provides structured task management capabilities for YokeFlow agents
  */
 
 import { Server } from '@modelcontextprotocol/sdk/server/index.js';
@@ -586,7 +586,7 @@ server.setRequestHandler(CallToolRequestSchema, async (request) => {
 
       case 'bash_docker':
         // Get Docker configuration from environment
-        const containerName = process.env.DOCKER_CONTAINER_NAME || 'autonomous-agent-container';
+        const containerName = process.env.DOCKER_CONTAINER_NAME || 'yokeflow-container';
         const command = args?.command as string;
 
         if (!command) {

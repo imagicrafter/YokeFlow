@@ -11,12 +11,20 @@ interface LogFile {
   timestamp: string;
 }
 
+interface GroupedSession {
+  sessionNumber: number;
+  timestamp: string;
+  humanLog?: LogFile;
+  eventsLog?: LogFile;
+}
+
 interface SessionLogsViewerProps {
   projectId: string;
 }
 
 export function SessionLogsViewer({ projectId }: SessionLogsViewerProps) {
   const [logs, setLogs] = useState<LogFile[]>([]);
+  const [groupedSessions, setGroupedSessions] = useState<GroupedSession[]>([]);
   const [selectedLog, setSelectedLog] = useState<LogFile | null>(null);
   const [logContent, setLogContent] = useState<string>('');
   const [loading, setLoading] = useState(true);
@@ -40,6 +48,33 @@ export function SessionLogsViewer({ projectId }: SessionLogsViewerProps) {
         timestamp: log.modified
       }));
       setLogs(mappedLogs);
+
+      // Group logs by session number
+      const sessionMap = new Map<number, GroupedSession>();
+      mappedLogs.forEach((log: LogFile) => {
+        if (!sessionMap.has(log.sessionNumber)) {
+          sessionMap.set(log.sessionNumber, {
+            sessionNumber: log.sessionNumber,
+            timestamp: log.timestamp,
+          });
+        }
+        const session = sessionMap.get(log.sessionNumber)!;
+        if (log.type === 'human') {
+          session.humanLog = log;
+        } else {
+          session.eventsLog = log;
+        }
+        // Use the most recent timestamp for the session
+        if (new Date(log.timestamp) > new Date(session.timestamp)) {
+          session.timestamp = log.timestamp;
+        }
+      });
+
+      // Convert to array and sort by session number descending (newest first)
+      const grouped = Array.from(sessionMap.values()).sort(
+        (a, b) => b.sessionNumber - a.sessionNumber
+      );
+      setGroupedSessions(grouped);
     } catch (err: any) {
       console.error('Failed to load logs list:', err);
       setError(err.message || 'Failed to load logs');
@@ -92,7 +127,7 @@ export function SessionLogsViewer({ projectId }: SessionLogsViewerProps) {
     );
   }
 
-  if (logs.length === 0) {
+  if (groupedSessions.length === 0) {
     return (
       <div className="bg-gray-900 border border-gray-800 rounded-lg p-8 text-center">
         <FileText className="w-12 h-12 mx-auto text-gray-600 mb-4" />
@@ -104,40 +139,57 @@ export function SessionLogsViewer({ projectId }: SessionLogsViewerProps) {
 
   return (
     <div className="grid grid-cols-1 lg:grid-cols-3 gap-6">
-      {/* Log Files List */}
+      {/* Session List (Grouped) */}
       <div className="lg:col-span-1">
         <h3 className="text-lg font-semibold text-gray-200 mb-4">Session Logs</h3>
-        <div className="space-y-2 overflow-y-auto max-h-[600px] pr-2">
-          {logs.map((log) => (
-            <button
-              key={log.filename}
-              onClick={() => loadLogContent(log)}
-              className={`w-full text-left px-4 py-3 rounded-lg border transition-colors ${
-                selectedLog?.filename === log.filename
-                  ? 'bg-blue-900/30 border-blue-700 text-blue-300'
-                  : 'bg-gray-900 border-gray-800 text-gray-300 hover:bg-gray-800 hover:border-gray-700'
-              }`}
+        <div className="space-y-3 overflow-y-auto max-h-[600px] pr-2">
+          {groupedSessions.map((session) => (
+            <div
+              key={session.sessionNumber}
+              className="bg-gray-900 border border-gray-800 rounded-lg p-3"
             >
-              <div className="flex items-start justify-between">
-                <div className="flex-1 min-w-0">
-                  <div className="font-medium truncate">
-                    {log.sessionNumber === 0 ? 'Initialization' : `Session #${log.sessionNumber}`}
-                  </div>
-                  <div className="text-xs mt-1 text-gray-500">
-                    {new Date(log.timestamp).toLocaleString()}
-                  </div>
-                </div>
-                <span
-                  className={`ml-2 px-2 py-1 rounded text-xs font-mono ${
-                    log.type === 'human'
-                      ? 'bg-green-900/30 text-green-400 border border-green-700/50'
-                      : 'bg-purple-900/30 text-purple-400 border border-purple-700/50'
-                  }`}
-                >
-                  {log.type === 'human' ? 'TXT' : 'JSONL'}
-                </span>
+              {/* Session Header */}
+              <div className="font-medium text-gray-200 mb-2">
+                {session.sessionNumber === 0 ? 'Initialization' : `Session #${session.sessionNumber}`}
               </div>
-            </button>
+              <div className="text-xs text-gray-500 mb-3">
+                {new Date(session.timestamp).toLocaleString()}
+              </div>
+
+              {/* Log File Buttons */}
+              <div className="space-y-2">
+                {session.humanLog && (
+                  <button
+                    onClick={() => loadLogContent(session.humanLog!)}
+                    className={`w-full text-left px-3 py-2 rounded-lg border transition-colors text-sm ${
+                      selectedLog?.filename === session.humanLog.filename
+                        ? 'bg-green-900/30 border-green-700 text-green-300'
+                        : 'bg-gray-800 border-gray-700 text-gray-300 hover:bg-gray-700 hover:border-gray-600'
+                    }`}
+                  >
+                    <div className="flex items-center justify-between">
+                      <span>Human-readable (TXT)</span>
+                      <FileText className="w-4 h-4" />
+                    </div>
+                  </button>
+                )}
+                {session.eventsLog && (
+                  <button
+                    onClick={() => loadLogContent(session.eventsLog!)}
+                    className={`w-full text-left px-3 py-2 rounded-lg border transition-colors text-sm ${
+                      selectedLog?.filename === session.eventsLog.filename
+                        ? 'bg-purple-900/30 border-purple-700 text-purple-300'
+                        : 'bg-gray-800 border-gray-700 text-gray-300 hover:bg-gray-700 hover:border-gray-600'
+                    }`}
+                  >
+                    <div className="flex items-center justify-between">
+                      <span>Structured events (JSONL)</span>
+                      <FileText className="w-4 h-4" />
+                    </div>
+                  </button>
+                )}
+              </div>
+            </div>
           ))}
         </div>
       </div>
@@ -172,7 +224,11 @@ export function SessionLogsViewer({ projectId }: SessionLogsViewerProps) {
               {loadingContent ? (
                 <div className="text-gray-400 text-center py-8">Loading log content...</div>
               ) : (
-                <pre className="text-xs font-mono text-gray-300 whitespace-pre-wrap break-words">
+                <pre className={`text-xs font-mono text-gray-300 ${
+                  selectedLog.type === 'events'
+                    ? 'whitespace-pre overflow-x-auto'
+                    : 'whitespace-pre-wrap break-words'
+                }`}>
                   {logContent}
                 </pre>
               )}

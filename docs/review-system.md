@@ -1,22 +1,21 @@
 # Review System - Developer Guide
 
-**Last Updated:** December 22, 2025
-**Status:** Production Ready (All 4 Phases Complete)
-
-> **Note:** This document provides a general overview of the review system for developers who want to learn from or fork this codebase. For detailed Phase 4 implementation notes, see [PROMPT_IMPROVEMENT_SYSTEM.md](../PROMPT_IMPROVEMENT_SYSTEM.md) (temporary development documentation that will be removed once fully tested).
+**Last Updated:** December 23, 2025
+**Status:** Production Ready (Phases 1-3 Complete)
 
 ---
 
 ## Overview
 
-The review system provides automated quality analysis and continuous improvement for agent sessions with four integrated phases:
+The review system provides automated quality analysis for agent sessions with three integrated phases:
 
 1. **Phase 1:** Quick checks (zero-cost, every session)
 2. **Phase 2:** Deep reviews (AI-powered, ~$0.10 each, automated triggers)
 3. **Phase 3:** Web UI dashboard (visual quality monitoring)
-4. **Phase 4:** Prompt improvement analysis (data-driven prompt optimization)
 
-This system helps identify issues early, suggests prompt improvements, tracks quality trends over time, and generates actionable recommendations to improve the global coding prompts.
+This system helps identify issues early, suggests prompt improvements, and tracks quality trends over time.
+
+**Note:** Deep reviews include suggestions for manually improving coding prompts. These can be downloaded from the Quality Dashboard and reviewed by developers to enhance the `prompts/coding_prompt.md` and `prompts/coding_prompt_docker.md` files.
 
 ---
 
@@ -31,7 +30,7 @@ This system helps identify issues early, suggests prompt improvements, tracks qu
          ▼
 ┌─────────────────────────────────────┐
 │  Phase 1: Quick Quality Check       │
-│  (orchestrator.py)                  │
+│  (quality_integration.py)           │
 │  - Parse JSONL logs                 │
 │  - Extract metrics                  │
 │  - Run quality checks               │
@@ -48,6 +47,7 @@ This system helps identify issues early, suggests prompt improvements, tracks qu
 │  - session_number % 5 == 0          │
 │  - quality < 7/10                   │
 │  - 5+ sessions since last review    │
+│  - Project completion (final)       │
 └────────┬────────────────────────────┘
          │
          ▼ (if triggered)
@@ -56,7 +56,7 @@ This system helps identify issues early, suggests prompt improvements, tracks qu
 │  (review_client.py)                 │
 │  - Load session logs                │
 │  - Send to Claude via SDK           │
-│  - Store in database                │
+│  - Store full review in database    │
 │  Cost: ~$0.10 per review            │
 └────────┬────────────────────────────┘
          │
@@ -66,20 +66,9 @@ This system helps identify issues early, suggests prompt improvements, tracks qu
 │  (QualityDashboard.tsx)             │
 │  - Fetch quality data via API       │
 │  - Render charts and badges         │
-│  - Display review.                  │
+│  - Display full review text         │
+│  - Download reviews as markdown     │
 │  - Show quality trends              │
-└────────┬────────────────────────────┘
-         │
-         ▼ (manual trigger or scheduled)
-┌─────────────────────────────────────┐
-│  Phase 4: Prompt Improvement        │
-│  (prompt_improvement_analyzer.py)   │
-│  - Aggregate deep review data       │
-│  - Group by themes (8 categories)   │
-│  - Generate proposals (7-12 each)   │
-│  - Rank by confidence & evidence    │
-│  - Display in Web UI                │
-│  Cost: $0 (or ~$0.30 with Claude)   │
 └─────────────────────────────────────┘
 ```
 
@@ -87,7 +76,7 @@ This system helps identify issues early, suggests prompt improvements, tracks qu
 
 ## How the Phases Work Together
 
-The four phases form an integrated feedback loop:
+The three phases form an integrated feedback loop:
 
 **Real-Time Monitoring (Phase 1 → Phase 3):**
 ```
@@ -96,36 +85,37 @@ Session completes → Quick check runs → Store metrics → Display in dashboar
                          If quality < 7 or session % 5 == 0
                                      ↓
                               Trigger deep review
+                                     ↓
+                         Store full review text (markdown)
+                                     ↓
+                         Display in Web UI with download option
 ```
 
-**Pattern Analysis (Phase 2 → Phase 4):**
+**Manual Prompt Improvement:**
 ```
-Multiple sessions run → Deep reviews accumulate recommendations
+Multiple sessions run → Deep reviews accumulate
                                      ↓
-                    Manual trigger: Analyze recommendations
+                    Developer downloads reviews from UI
                                      ↓
-                    Group by theme → Calculate evidence
+                    Read suggestions in markdown format
                                      ↓
-                    Generate proposals → Display in UI
-                                     ↓
-                    Developer reviews → Apply to prompts
+                    Manually apply improvements to prompts
                                      ↓
                     New sessions run → Quality improves
 ```
 
 **Data Flow:**
 1. **Phase 1** stores metrics in `session_quality_checks` table
-2. **Phase 2** adds full `review_text` (markdown) to same row
-3. **Phase 3** displays complete review text with collapsible sections
-4. **Phase 4** analyzes review text patterns across multiple sessions
+2. **Phase 2** adds full `review_text` (markdown) to same row with prompt improvement suggestions
+3. **Phase 3** displays complete review text with collapsible sections and download buttons
 
-**Key Insight:** Each phase builds on the previous one. You can use Phase 1 alone for basic monitoring, add Phase 2 for deeper insights, Phase 3 for visualization, and Phase 4 for systematic prompt improvement.
+**Key Insight:** Each phase builds on the previous one. Phase 1 provides instant feedback, Phase 2 adds detailed analysis with actionable recommendations, and Phase 3 makes everything visible and downloadable for developers.
 
 ---
 
 ## Phase 1: Quick Quality Checks
 
-**File:** [`review_metrics.py`](../review_metrics.py)
+**File:** [`review/review_metrics.py`](../review/review_metrics.py)
 **Cost:** $0 (zero API calls)
 **When:** After every session completes
 
@@ -182,7 +172,7 @@ INSERT INTO session_quality_checks (
 
 ## Phase 2: Deep Reviews
 
-**File:** [`review_client.py`](../review_client.py)
+**File:** [`review/review_client.py`](../review/review_client.py)
 **Cost:** ~$0.10 per review (~$0.40 per 20-session project)
 **When:** Automated triggers (see below)
 
@@ -201,6 +191,10 @@ Deep reviews are triggered when:
 3. **5 sessions since last deep review**
    - Even if not at 5-session interval
    - Ensures regular coverage
+
+4. **Project completion** (final session)
+   - Always runs on last session
+   - Ensures projects with <5 sessions get reviewed
 
 **Implementation:**
 ```python
@@ -250,7 +244,7 @@ async def should_trigger_deep_review(
 3. **Extract Rating from Review**
    - Parse overall rating (1-10) from review text
    - Store complete review as markdown
-   - No parsing of recommendations (kept in full review text)
+   - Full review includes prompt improvement suggestions
 
 4. **Store in Database**
    ```python
@@ -280,22 +274,24 @@ Returns structured feedback with:
 
 ### Non-Blocking Execution
 
-Deep reviews run in background:
+Regular deep reviews run in background (don't block sessions):
 ```python
-# In orchestrator.py
-async def _maybe_trigger_deep_review(self, session_id, project_path, quality):
-    should_trigger = await should_trigger_deep_review(...)
-    if should_trigger:
-        # Spawn background task (doesn't block session completion)
-        asyncio.create_task(
-            self._run_deep_review_background(session_id, project_path)
-        )
+# For regular reviews (every 5th session, low quality)
+asyncio.create_task(
+    self._run_deep_review_background(session_id, project_path)
+)
+```
+
+Final reviews (project completion) run synchronously (ensure completion):
+```python
+# For final reviews (project completion with force_final_review=True)
+await self._run_deep_review_background(session_id, project_path)
 ```
 
 This ensures:
-- Sessions complete immediately
+- Regular sessions complete immediately
 - Reviews run in parallel
-- No impact on auto-continue flow
+- Final reviews complete before project exit
 - Database updates happen asynchronously
 
 ---
@@ -321,18 +317,19 @@ This ensures:
   - Yellow (5-6): Fair
   - Red (1-4): Poor
 - Shows browser verification usage ("nn Browser Checks")
-- Session labels ("Session nn" instead of "Snn")
+- Session labels ("Session nn")
 
-**3. Deep Review Reports** (December 2025 Update)
+**3. Deep Review Reports**
 - Collapsible sections for each deep review
-- Displays **full review text** as markdown (not parsed recommendations)
+- Displays **full review text** as markdown
 - Download button for each review (markdown file format)
 - Expand/collapse individual reviews
 - Shows session number and quality badge per review
+- **Includes prompt improvement suggestions** that can be manually applied
 
 ### API Endpoints
 
-All endpoints already implemented in [`api/main.py`](../api/main.py):
+All endpoints implemented in [`api/main.py`](../api/main.py):
 
 ```python
 # Overall quality summary
@@ -355,309 +352,10 @@ GET /api/projects/{id}/quality/browser-verification
 3. View dashboard with:
    - Summary statistics
    - Quality trend over time
-   - Deep review
-
----
-
-## Phase 4: Prompt Improvement Analysis
-
-**File:** [`prompt_improvement_analyzer.py`](../prompt_improvement_analyzer.py)
-**Cost:** $0 (zero API calls, or ~$0.30 with optional Claude enhancement)
-**When:** Manual trigger via Web UI or programmatic analysis
-
-### Purpose
-
-Phase 4 transforms scattered deep review recommendations into concrete, prioritized improvements for the global coding prompts. Instead of reading individual session reviews, developers get aggregated patterns and specific proposals.
-
-### How It Works
-
-**1. Load Deep Review Data**
-```python
-# Query database for all deep reviews with review text
-reviews = await db.fetch("""
-    SELECT
-        sqc.session_id,
-        sqc.review_text,          -- Full markdown review
-        sqc.overall_rating,
-        s.session_number,
-        s.project_id
-    FROM session_quality_checks sqc
-    JOIN sessions s ON sqc.session_id = s.id
-    WHERE sqc.check_type = 'deep'
-      AND sqc.review_text IS NOT NULL
-      AND LENGTH(sqc.review_text) > 0
-""")
-```
-
-**2. Extract Recommendations from Review Text**
-
-Parse the markdown review text to extract recommendations, then group into 8 categories using keyword matching:
-- **browser_verification** - Playwright usage, screenshots, visual testing
-- **error_handling** - Error recovery, retry logic, debugging
-- **git_commits** - Commit messages, formatting, co-authorship
-- **testing** - Test creation, verification, coverage
-- **docker** - Sandbox usage, bash_docker commands
-- **parallel_execution** - Tool parallelization, efficiency
-- **task_management** - MCP tool usage, task workflow
-- **documentation** - Code comments, clarity
-- **general** - Everything else
-
-**3. Calculate Evidence Metrics**
-
-For each theme:
-```python
-{
-    "theme": "browser_verification",
-    "frequency": 11,              # Appeared in 11 recommendations
-    "avg_quality": 7.9,           # Average rating of sessions with this issue
-    "unique_sessions": 7,         # Number of unique sessions
-    "session_ids": [...],         # Evidence: which sessions
-    "session_numbers": [5, 10, 15, ...]
-}
-```
-
-**4. Generate Proposals**
-
-Each proposal includes:
-- **prompt_file** - Which prompt to modify (`coding_prompt_docker.md`)
-- **section_name** - Where to add/modify text
-- **proposed_text** - Specific recommendation text
-- **rationale** - Why this helps (based on session patterns)
-- **evidence** - Session IDs, quality ratings, frequency
-- **confidence_level** - 1-10 score based on evidence strength
-
-**Confidence Scoring:**
-```python
-if frequency >= 5 and avg_quality >= 8:
-    confidence = 9  # High confidence: frequent issue, high-quality sessions
-elif frequency >= 3:
-    confidence = 7  # Medium confidence: moderate frequency
-else:
-    confidence = 5  # Lower confidence: infrequent
-```
-
-### Example Analysis Results
-
-**Input:** 48 sessions across 1 project with 16 deep reviews
-
-**Output:** 12 proposals grouped by theme
-```
-Theme: browser_verification (11 recommendations, 7 unique sessions, 7.9/10 avg)
-├─ Proposal: "Strengthen Browser Verification Requirements"
-│  Section: Browser Verification
-│  Confidence: 9/10
-│  Evidence: Sessions 5, 10, 12, 15, 18, 20, 23 (avg quality 7.9)
-│
-Theme: error_handling (9 recommendations, 6 unique sessions, 7.6/10 avg)
-├─ Proposal: "Enhanced Error Recovery Patterns"
-│  Section: Error Handling
-│  Confidence: 9/10
-│  Evidence: Sessions 5, 8, 10, 15, 20, 25 (avg quality 7.6)
-│
-Theme: testing (7 recommendations, 5 unique sessions, 8.2/10 avg)
-├─ Proposal: "Comprehensive Testing Requirements"
-│  Section: Testing Standards
-│  Confidence: 8/10
-│  Evidence: Sessions 10, 15, 20, 25, 30 (avg quality 8.2)
-```
-
-### Optional: Claude Enhancement
-
-For the top N themes (default: 3), the analyzer can optionally use Claude to generate more specific before/after diffs:
-
-```python
-# Hybrid approach: Claude for top themes, direct aggregation for others
-if theme_rank <= claude_budget and claude_enabled:
-    # Request Claude to generate specific text diffs
-    diff = await _generate_diff_with_claude(theme, recommendations)
-    # Returns: { "original_text": "...", "proposed_text": "...", "rationale": "..." }
-else:
-    # Direct aggregation (no API call)
-    proposed_text = "\n".join([r['text'] for r in theme_recommendations])
-```
-
-**Status:** Infrastructure complete, currently uses direct aggregation (Claude feature gracefully disabled pending SDK debugging).
-
-### Database Storage
-
-**Analysis Metadata:**
-```sql
-CREATE TABLE prompt_improvement_analyses (
-    id UUID PRIMARY KEY,
-    projects_analyzed UUID[],           -- Which projects
-    sandbox_type VARCHAR(20),           -- docker or local
-    sessions_analyzed INTEGER,          -- Total sessions reviewed
-    deep_reviews_processed INTEGER,     -- Reviews with recommendations
-    proposals_generated INTEGER,        -- Number of proposals created
-    status VARCHAR(20),                 -- pending/running/completed/failed
-    triggered_by VARCHAR(50),           -- manual/scheduled/api
-    created_at TIMESTAMPTZ,
-    completed_at TIMESTAMPTZ
-);
-```
-
-**Individual Proposals:**
-```sql
-CREATE TABLE prompt_proposals (
-    id UUID PRIMARY KEY,
-    analysis_id UUID REFERENCES prompt_improvement_analyses(id),
-    prompt_file VARCHAR(100),           -- coding_prompt_docker.md
-    section_name VARCHAR(200),          -- Where to modify
-    change_type VARCHAR(50),            -- add/modify/remove
-    original_text TEXT,                 -- Current prompt text (optional)
-    proposed_text TEXT,                 -- Recommended text
-    rationale TEXT,                     -- Why this helps
-    evidence JSONB,                     -- Session IDs, metrics
-    confidence_level INTEGER,           -- 1-10 score
-    status VARCHAR(20),                 -- pending/accepted/rejected/implemented
-    created_at TIMESTAMPTZ
-);
-```
-
-### API Endpoints
-
-**File:** [`api/prompt_improvements_routes.py`](../api/prompt_improvements_routes.py)
-
-```python
-# Trigger new analysis
-POST /api/prompt-improvements/analyze
-Body: {
-    "project_ids": ["uuid1", "uuid2"],
-    "sandbox_type": "docker",
-    "last_n_days": 90
-}
-
-# List all analyses
-GET /api/prompt-improvements?limit=20
-
-# Get analysis details with proposals
-GET /api/prompt-improvements/{analysis_id}
-
-# Get proposals for analysis
-GET /api/prompt-improvements/{analysis_id}/proposals
-
-# Update proposal status
-PATCH /api/prompt-improvements/proposals/{proposal_id}
-Body: { "status": "accepted" }
-
-# Delete analysis (cascades to proposals)
-DELETE /api/prompt-improvements/{analysis_id}
-```
-
-### Web UI Components
-
-**Dashboard** (`/prompt-improvements`):
-- List of all analyses with status badges
-- Quick stats: projects analyzed, sessions reviewed, proposals generated
-- Delete functionality with confirmation dialogs
-- Dark mode support
-
-**Analysis Detail** (`/prompt-improvements/{id}`):
-- Analysis metadata (date, projects, sessions)
-- Patterns identified (themes with frequency, quality, unique sessions)
-- Full proposal list with confidence levels
-- Diff viewer showing before/after text
-- Accept/reject buttons for individual proposals
-
-**Key Features:**
-- Real-time status updates during analysis
-- Evidence display (session IDs, quality ratings)
-- Grouped by confidence level (high/medium/low)
-- Markdown rendering in proposal text
-- Copy-to-clipboard for quick prompt editing
-
-### Workflow
-
-**Typical Usage:**
-
-1. **Run projects** - Let agent complete 20-50 sessions
-2. **Deep reviews trigger** - Every 5 sessions or quality < 7
-3. **Accumulate data** - Wait for 10-15 deep reviews with recommendations
-4. **Trigger analysis** - Manual via Web UI or API call
-5. **Review proposals** - Check confidence levels and evidence
-6. **Apply improvements** - Edit `coding_prompt_docker.md` based on proposals
-7. **Track impact** - Monitor quality ratings in subsequent sessions
-
-**Example Workflow:**
-```bash
-# 1. Check deep reviews available
-psql $DATABASE_URL -c "
-    SELECT COUNT(*) FROM session_quality_checks
-    WHERE check_type = 'deep'
-      AND jsonb_array_length(prompt_improvements) > 0
-"
-# Output: 16 reviews
-
-# 2. Trigger analysis via API
-curl -X POST http://localhost:8000/api/prompt-improvements/analyze \
-  -H "Content-Type: application/json" \
-  -d '{
-    "project_ids": ["550e8400-e29b-41d4-a716-446655440000"],
-    "sandbox_type": "docker"
-  }'
-
-# 3. View proposals in Web UI
-open http://localhost:3000/prompt-improvements
-
-# 4. Apply high-confidence proposals to prompt files
-# (Manual step: edit prompts/coding_prompt_docker.md)
-
-# 5. Run new sessions and compare quality
-# (Quality ratings should improve if proposals were on target)
-```
-
-### Design Decisions
-
-**Why aggregate across sessions?**
-- Single session feedback can be noisy
-- Patterns emerge from multiple observations
-- Higher confidence in frequent issues
-
-**Why theme-based grouping?**
-- Easier to organize prompt sections
-- Related issues grouped together
-- Clear categories for prompt engineering
-
-**Why confidence scoring?**
-- Prioritize high-frequency, high-quality recommendations
-- Avoid chasing one-off issues
-- Focus on impactful improvements
-
-**Why manual trigger instead of automatic?**
-- Analysis requires human judgment
-- Prompts are global (affect all future sessions)
-- Cost control (optional Claude calls)
-- Allows accumulation of sufficient data (10+ reviews)
-
-**Why store in database?**
-- Track which proposals were implemented
-- Measure impact over time (future: A/B testing)
-- Historical record of prompt evolution
-- Enables version tracking
-
-### Extensibility
-
-**Future Enhancements:**
-
-1. **A/B Testing Framework**
-   - Test prompt versions in parallel
-   - Compare quality metrics
-   - Automatic rollback if quality degrades
-
-2. **Impact Tracking**
-   - Link proposals to quality improvements
-   - Show before/after metrics
-   - Validate effectiveness of changes
-
-3. **Scheduled Analysis**
-   - Run weekly/monthly automatically
-   - Email/Slack notifications for new proposals
-   - Trend reports
-
-4. **Claude SDK Enhancement**
-   - Debug empty response issue
-   - Generate more specific before/after diffs
-   - Validate proposed text fits prompt structure
+   - Deep review reports with download option
+4. Download reviews as markdown files
+5. Read prompt improvement suggestions
+6. Manually apply improvements to `prompts/coding_prompt.md` or `prompts/coding_prompt_docker.md`
 
 ---
 
@@ -671,7 +369,7 @@ CREATE TABLE session_quality_checks (
     session_id UUID NOT NULL REFERENCES sessions(id),
 
     -- Check metadata
-    check_type VARCHAR(10) NOT NULL,  -- 'quick' | 'deep' | 'final'
+    check_type VARCHAR(10) NOT NULL,  -- 'quick' | 'deep'
     check_version VARCHAR(20),         -- For tracking prompt versions
     created_at TIMESTAMPTZ DEFAULT NOW(),
 
@@ -688,85 +386,15 @@ CREATE TABLE session_quality_checks (
     warnings JSONB DEFAULT '[]',
 
     -- Deep review fields (Phase 2)
-    review_text TEXT,                  -- Full markdown review from Claude
-    prompt_improvements JSONB DEFAULT '[]',  -- Legacy field (now unused, kept for compatibility)
+    review_text TEXT,                  -- Full markdown review from Claude (includes suggestions)
 
     -- Indexes
-    CONSTRAINT check_type_valid CHECK (check_type IN ('quick', 'deep', 'final'))
+    CONSTRAINT check_type_valid CHECK (check_type IN ('quick', 'deep'))
 );
 
 CREATE INDEX idx_quality_session ON session_quality_checks(session_id);
 CREATE INDEX idx_quality_type ON session_quality_checks(check_type);
 CREATE INDEX idx_quality_rating ON session_quality_checks(overall_rating);
-```
-
-**Phase 4 Tables:**
-
-```sql
--- Prompt improvement analyses
-CREATE TABLE prompt_improvement_analyses (
-    id UUID PRIMARY KEY DEFAULT uuid_generate_v4(),
-    projects_analyzed UUID[] NOT NULL,
-    sandbox_type VARCHAR(20) NOT NULL,
-    sessions_analyzed INTEGER DEFAULT 0,
-    deep_reviews_processed INTEGER DEFAULT 0,
-    proposals_generated INTEGER DEFAULT 0,
-    status VARCHAR(20) DEFAULT 'pending',
-    error_message TEXT,
-    triggered_by VARCHAR(50) DEFAULT 'manual',
-    user_id UUID,
-    created_at TIMESTAMPTZ DEFAULT NOW(),
-    started_at TIMESTAMPTZ,
-    completed_at TIMESTAMPTZ,
-
-    CONSTRAINT status_valid CHECK (status IN ('pending', 'running', 'completed', 'failed'))
-);
-
--- Individual prompt proposals
-CREATE TABLE prompt_proposals (
-    id UUID PRIMARY KEY DEFAULT uuid_generate_v4(),
-    analysis_id UUID NOT NULL REFERENCES prompt_improvement_analyses(id) ON DELETE CASCADE,
-    prompt_file VARCHAR(100) NOT NULL,
-    section_name VARCHAR(200) NOT NULL,
-    change_type VARCHAR(50) NOT NULL,
-    original_text TEXT,
-    proposed_text TEXT NOT NULL,
-    rationale TEXT NOT NULL,
-    evidence JSONB DEFAULT '[]',
-    confidence_level INTEGER NOT NULL CHECK (confidence_level BETWEEN 1 AND 10),
-    status VARCHAR(20) DEFAULT 'pending',
-    applied_at TIMESTAMPTZ,
-    applied_by VARCHAR(100),
-    applied_to_version VARCHAR(100),
-    created_at TIMESTAMPTZ DEFAULT NOW(),
-
-    CONSTRAINT status_valid CHECK (status IN ('pending', 'accepted', 'rejected', 'implemented'))
-);
-
--- Prompt version tracking (optional, for future A/B testing)
-CREATE TABLE prompt_versions (
-    id UUID PRIMARY KEY DEFAULT uuid_generate_v4(),
-    prompt_file VARCHAR(100) NOT NULL,
-    version_name VARCHAR(50) NOT NULL,
-    content TEXT NOT NULL,
-    git_commit_hash VARCHAR(100),
-    parent_version_id UUID REFERENCES prompt_versions(id),
-    changes_summary TEXT,
-    is_active BOOLEAN DEFAULT false,
-    created_by VARCHAR(100),
-    created_at TIMESTAMPTZ DEFAULT NOW(),
-
-    UNIQUE(prompt_file, version_name)
-);
-
--- Indexes for Phase 4
-CREATE INDEX idx_analyses_status ON prompt_improvement_analyses(status);
-CREATE INDEX idx_analyses_created ON prompt_improvement_analyses(created_at);
-CREATE INDEX idx_proposals_analysis ON prompt_proposals(analysis_id);
-CREATE INDEX idx_proposals_confidence ON prompt_proposals(confidence_level DESC);
-CREATE INDEX idx_proposals_status ON prompt_proposals(status);
-CREATE INDEX idx_versions_file ON prompt_versions(prompt_file);
-CREATE INDEX idx_versions_active ON prompt_versions(is_active) WHERE is_active = true;
 ```
 
 **Database Views:**
@@ -813,14 +441,15 @@ ORDER BY q.created_at DESC;
 ### Why Three Phases?
 
 1. **Phase 1 (Quick):** Catches obvious issues immediately at zero cost
-2. **Phase 2 (Deep):** Provides AI-powered analysis for deeper insights
-3. **Phase 3 (UI):** Makes data visible and actionable for users
+2. **Phase 2 (Deep):** Provides AI-powered analysis with actionable suggestions
+3. **Phase 3 (UI):** Makes data visible, downloadable, and actionable for users
 
 ### Why Automated Triggers?
 
 - **Predictable costs:** Max ~$0.40 per 20-session project
 - **Early detection:** Quality drops trigger immediate review
 - **Regular coverage:** Every 5 sessions ensures trends are caught
+- **Final review:** Project completion always gets reviewed (even if <5 sessions)
 - **No manual work:** Runs automatically in background
 
 ### Why claude_agent_sdk?
@@ -838,6 +467,20 @@ ORDER BY q.created_at DESC;
 - New code uses `session_number` directly
 - Result: Correct triggers at 5, 10, 15, 20, etc.
 
+### Why Manual Prompt Improvements?
+
+Deep reviews include specific suggestions for improving the coding prompts. Developers can:
+1. Download reviews as markdown files from the Web UI
+2. Read the prompt improvement suggestions
+3. Manually apply the most relevant suggestions to prompt files
+4. Monitor quality improvements in subsequent sessions
+
+This manual approach ensures:
+- Human judgment in applying changes to global prompts
+- Careful review before modifying core agent behavior
+- Flexibility to adapt suggestions to specific use cases
+- Full control over prompt evolution
+
 ---
 
 ## Testing
@@ -850,7 +493,7 @@ python tests/test_review_phase2.py
 ```
 
 Tests cover:
-- ✅ Trigger logic (interval, quality, gap)
+- ✅ Trigger logic (interval, quality, gap, project completion)
 - ✅ Metrics extraction from logs
 - ✅ Review client functionality
 - ✅ Database storage and retrieval
@@ -864,17 +507,16 @@ Tests cover:
 - Phase 1 (quick checks): $0 (20 sessions × $0)
 - Phase 2 (deep reviews): ~$0.40 (4 reviews × $0.10)
 - Phase 3 (Web UI): $0 (data visualization only)
-- Phase 4 (prompt analysis): $0 (or ~$0.30 if Claude enhancement enabled)
-- **Total: ~$0.40-$0.70 per project**
+- **Total: ~$0.40 per project**
 
 **Triggers:**
 - Session 5: Deep review ($0.10)
 - Session 10: Deep review ($0.10)
 - Session 15: Deep review ($0.10)
 - Session 20: Deep review ($0.10)
-- Manual: Prompt analysis ($0-$0.30)
+- Project completion: Deep review if not done recently
 
-If quality drops below 7/10, additional deep reviews may trigger. Prompt analysis is typically run once per 10-15 deep reviews (across multiple sessions/projects).
+If quality drops below 7/10, additional deep reviews may trigger.
 
 ---
 
@@ -882,23 +524,24 @@ If quality drops below 7/10, additional deep reviews may trigger. Prompt analysi
 
 ### Viewing Quality in Web UI
 
-1. Start project: `python autonomous_agent.py --project-dir ./my_project`
+1. Start project via Web UI
 2. Let sessions run (auto-continues)
 3. Open Web UI: http://localhost:3000
 4. Click project name
-5. Click "Quality" tab → "Session Quality" sub-tab
+5. Click "Quality" tab (📊 icon)
 6. View dashboard:
    - Check average quality (should be 7+)
    - Review quality trend chart
    - Expand deep review reports to read full analysis
    - Download reviews as markdown files
-   - Address quality issues if any
+   - Read prompt improvement suggestions
+   - Manually apply relevant suggestions to prompt files
 
 ### Manual Deep Review (CLI)
 
 ```bash
 # Review specific session
-python review_client.py generations/my_project 5
+python review/review_agent.py generations/my_project 5
 
 # Output:
 # Session 5 Deep Review:
@@ -910,16 +553,13 @@ python review_client.py generations/my_project 5
 # - Browser verification analysis
 # - Error pattern analysis
 # - Prompt adherence evaluation
-# - Concrete prompt improvements recommendations
-#
-# Note: Recommendations are included in the full review text,
-#       not parsed into separate fields
+# - Concrete prompt improvement recommendations
 ```
 
 ### Checking Trigger Status
 
 ```python
-from review_client import should_trigger_deep_review
+from review.review_client import should_trigger_deep_review
 from uuid import UUID
 
 project_id = UUID("...")
@@ -948,7 +588,7 @@ should_trigger = await should_trigger_deep_review(
 
 2. Are sessions completing successfully?
    ```bash
-   python task_status.py generations/my_project
+   python scripts/task_status.py generations/my_project
    ```
 
 3. Check database for reviews:
@@ -962,7 +602,7 @@ should_trigger = await should_trigger_deep_review(
 
 4. Check API logs for trigger messages:
    ```bash
-   grep "Deep review trigger" logs/api.log
+   # Look for "Triggering deep review" messages in API logs
    ```
 
 ### Reviews Stored But Not Showing in UI
@@ -990,21 +630,15 @@ should_trigger = await should_trigger_deep_review(
 
 ## Future Enhancements
 
-**Phase 1-3 Enhancements:**
+**Phases 1-3:**
 - Manual review trigger button in UI
 - Quality filters and search
 - PDF report export
 - Email/Slack alerts for critical issues
 - Cross-project comparative analysis
+- Automated prompt improvement analysis system
 
-**Phase 4 Enhancements:**
-- A/B testing framework for prompt versions
-- Automatic impact tracking (quality before/after changes)
-- Scheduled analysis runs (weekly/monthly)
-- Claude SDK debugging for enhanced diff generation
-- Direct prompt editing from Web UI with version control
-
-See [TODO.md](../TODO.md) for complete roadmap.
+See [TODO-FUTURE.md](../TODO-FUTURE.md) for complete roadmap.
 
 ---
 
@@ -1021,14 +655,11 @@ See [TODO.md](../TODO.md) for complete roadmap.
 
 **Review System:**
 - [prompts/review_prompt.md](../prompts/review_prompt.md) - Deep review instructions for Phase 2
-- [PROMPT_IMPROVEMENT_SYSTEM.md](../PROMPT_IMPROVEMENT_SYSTEM.md) - Phase 4 implementation details (temporary dev docs)
 
 **Code Reference:**
-- [review_metrics.py](../review_metrics.py) - Phase 1 implementation
-- [review_client.py](../review_client.py) - Phase 2 implementation
-- [prompt_improvement_analyzer.py](../prompt_improvement_analyzer.py) - Phase 4 implementation
+- [review/review_metrics.py](../review/review_metrics.py) - Phase 1 implementation
+- [review/review_client.py](../review/review_client.py) - Phase 2 implementation
 - [web-ui/src/components/QualityDashboard.tsx](../web-ui/src/components/QualityDashboard.tsx) - Phase 3 UI
-- [web-ui/src/components/PromptImprovementDashboard.tsx](../web-ui/src/components/PromptImprovementDashboard.tsx) - Phase 4 UI
 
 ---
 
@@ -1043,28 +674,22 @@ The review system is production-ready and provides a complete feedback loop for 
 
 **Phase 2 - Deep Reviews:**
 - ✅ AI-powered analysis at critical points
-- ✅ Automated triggers (every 5 sessions or quality < 7)
-- ✅ Structured prompt improvement recommendations
+- ✅ Automated triggers (every 5 sessions, quality < 7, project completion)
+- ✅ Structured prompt improvement recommendations in full review text
 
 **Phase 3 - Quality Dashboard:**
 - ✅ Beautiful web UI for monitoring trends
 - ✅ Visual quality charts and badges
-- ✅ Deep review recommendations display
+- ✅ Deep review display with download option
+- ✅ Manual prompt improvement workflow
 
-**Phase 4 - Prompt Optimization:**
-- ✅ Aggregate patterns across sessions
-- ✅ Theme-based grouping (8 categories)
-- ✅ Confidence-scored proposals
-- ✅ Evidence-backed recommendations
-- ✅ Manual trigger with full control
-
-**Total Cost:** ~$0.40-$0.70 per 20-session project
+**Total Cost:** ~$0.40 per 20-session project
 
 **The Complete Loop:**
 1. Sessions run → Quick checks identify issues
-2. Deep reviews analyze patterns → Store recommendations
-3. Dashboard shows quality trends → Highlight problems
-4. Prompt analysis aggregates data → Generate proposals
-5. Apply improvements → Monitor impact in next sessions
+2. Deep reviews analyze patterns → Store full recommendations in review text
+3. Dashboard shows quality trends → Download reviews
+4. Developer reads suggestions → Manually apply to prompts
+5. New sessions run → Monitor quality improvements
 
 Use this system to identify issues early, improve your prompts systematically, and track quality trends over time!

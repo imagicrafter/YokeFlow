@@ -1,5 +1,5 @@
 /**
- * API Client for the Autonomous Coding Agent FastAPI backend
+ * API Client for the YokeFlow FastAPI backend
  */
 
 import axios, { AxiosInstance } from 'axios';
@@ -31,6 +31,9 @@ import type {
   UpdateProposalRequest,
   ApplyProposalResponse,
   ImprovementMetrics,
+  Screenshot,
+  ContainerStatus,
+  ContainerActionResponse,
 } from './types';
 
 const API_BASE = process.env.NEXT_PUBLIC_API_URL || 'http://localhost:8000';
@@ -114,7 +117,7 @@ class ApiClient {
 
   async createProjectWithFile(
     name: string,
-    specFile: File,
+    specFiles: File | File[],
     force: boolean = false,
     sandboxType: 'docker' | 'local' = 'docker',
     initializerModel?: string,
@@ -122,7 +125,13 @@ class ApiClient {
   ): Promise<CreateProjectResponse> {
     const formData = new FormData();
     formData.append('name', name);
-    formData.append('spec_file', specFile);
+
+    // Handle single or multiple files
+    const files = Array.isArray(specFiles) ? specFiles : [specFiles];
+    files.forEach(file => {
+      formData.append('spec_files', file);
+    });
+
     formData.append('force', force.toString());
     formData.append('sandbox_type', sandboxType);
     if (initializerModel) formData.append('initializer_model', initializerModel);
@@ -139,6 +148,30 @@ class ApiClient {
   async deleteProject(projectId: string): Promise<void> {
     await this.client.delete(`/api/projects/${projectId}`);
   }
+
+  // Container Management
+
+  async getContainerStatus(projectId: string): Promise<ContainerStatus> {
+    const response = await this.client.get<ContainerStatus>(`/api/projects/${projectId}/container/status`);
+    return response.data;
+  }
+
+  async startContainer(projectId: string): Promise<ContainerActionResponse> {
+    const response = await this.client.post<ContainerActionResponse>(`/api/projects/${projectId}/container/start`);
+    return response.data;
+  }
+
+  async stopContainer(projectId: string): Promise<ContainerActionResponse> {
+    const response = await this.client.post<ContainerActionResponse>(`/api/projects/${projectId}/container/stop`);
+    return response.data;
+  }
+
+  async deleteContainer(projectId: string): Promise<ContainerActionResponse> {
+    const response = await this.client.delete<ContainerActionResponse>(`/api/projects/${projectId}/container`);
+    return response.data;
+  }
+
+  // Progress and Settings
 
   async getProgress(projectId: string): Promise<Progress> {
     const response = await this.client.get<Progress>(`/api/projects/${projectId}/progress`);
@@ -240,6 +273,14 @@ class ApiClient {
   async listSessions(projectId: string): Promise<Session[]> {
     const response = await this.client.get<Session[]>(
       `/api/projects/${projectId}/sessions`
+    );
+    return response.data;
+  }
+
+  async cleanupOrphanedSessions(): Promise<{ success: boolean; cleaned_count: number; message: string }> {
+    const response = await this.client.post<{ success: boolean; cleaned_count: number; message: string }>(
+      '/api/admin/cleanup-orphaned-sessions',
+      {}
     );
     return response.data;
   }
@@ -412,6 +453,24 @@ class ApiClient {
       `/api/prompt-improvements/versions/${versionId}/activate`
     );
     return response.data;
+  }
+
+  /**
+   * List all screenshots for a project
+   */
+  async listScreenshots(projectId: string): Promise<Screenshot[]> {
+    const response = await this.client.get<Screenshot[]>(
+      `/api/projects/${projectId}/screenshots`
+    );
+    return response.data;
+  }
+
+  /**
+   * Get the URL for a specific screenshot
+   * Returns the full URL that can be used in an <img> tag
+   */
+  getScreenshotUrl(projectId: string, filename: string): string {
+    return `${API_BASE}/api/projects/${projectId}/screenshots/${filename}`;
   }
 }
 

@@ -26,9 +26,9 @@ while true; do
                 echo "[$(date)] ✅ Docker daemon restored" | tee -a "$LOGFILE"
 
                 # Check if PostgreSQL container is running
-                if ! docker ps | grep -q autonomous_coding_postgres; then
+                if ! docker ps | grep -q yokeflow_postgres; then
                     echo "[$(date)] 🔄 Starting PostgreSQL container..." | tee -a "$LOGFILE"
-                    docker start autonomous_coding_postgres
+                    docker-compose up -d postgres
                 fi
 
                 break

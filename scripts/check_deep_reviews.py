@@ -7,7 +7,7 @@ from pathlib import Path
 
 sys.path.insert(0, str(Path(__file__).parent.parent))
 
-from database_connection import get_db
+from core.database_connection import get_db
 
 
 async def main():

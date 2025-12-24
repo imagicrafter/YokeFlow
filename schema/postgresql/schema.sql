@@ -1,11 +1,15 @@
 -- =============================================================================
 -- YokeFlow (Autonomous Coding Agent) - Complete PostgreSQL Schema
 -- =============================================================================
--- Version: 2.0.0
--- Date: December 2024
+-- Version: 2.1.0
+-- Date: December 23, 2025
 --
 -- This is the consolidated schema file that reflects the current database state.
 -- All migrations have been applied and consolidated into this single file.
+--
+-- Changelog:
+--   2.1.0 (Dec 23, 2025): Added session heartbeat tracking
+--   2.0.0 (Dec 2025): Initial consolidated schema
 --
 -- To initialize a fresh database, run:
 --   python scripts/init_database.py
@@ -136,6 +140,7 @@ CREATE TABLE sessions (
     created_at TIMESTAMPTZ DEFAULT NOW(),
     started_at TIMESTAMPTZ,
     ended_at TIMESTAMPTZ,
+    last_heartbeat TIMESTAMPTZ,  -- Track active sessions to prevent false-positive stale detection
 
     -- Session outcome
     error_message TEXT,
@@ -164,6 +169,9 @@ CREATE INDEX idx_sessions_project_status ON sessions(project_id, status);
 CREATE INDEX idx_sessions_type ON sessions(type);
 CREATE INDEX idx_sessions_created_at ON sessions(created_at DESC);
 CREATE INDEX idx_sessions_metrics ON sessions USING GIN (metrics);
+CREATE INDEX idx_sessions_stale_detection ON sessions (status, last_heartbeat) WHERE status = 'running';
+
+COMMENT ON COLUMN sessions.last_heartbeat IS 'Timestamp of last heartbeat update during session execution. Used to detect truly stale sessions vs. long-running active sessions.';
 
 -- -----------------------------------------------------------------------------
 -- Hierarchical Task Management Tables

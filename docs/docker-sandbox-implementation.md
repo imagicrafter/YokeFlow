@@ -1,270 +1,185 @@
 # Docker Sandbox Implementation
 
-**Target Audience:** Developers who want to understand or extend the Docker sandbox functionality.
+YokeFlow uses Docker containers to isolate agent execution and prevent environment variable leakage.
 
 ---
 
-## Table of Contents
+## Quick Reference
 
-1. [Overview](#overview)
-2. [Architecture](#architecture)
-3. [Container Lifecycle](#container-lifecycle)
-4. [How It Works](#how-it-works)
-5. [Implementation Details](#implementation-details)
-6. [Agent Integration](#agent-integration)
-7. [Performance Considerations](#performance-considerations)
-8. [Testing](#testing)
-9. [Troubleshooting](#troubleshooting)
-10. [Extending the System](#extending-the-system)
+**Current Implementation:**
+- ✅ Container reuse between coding sessions (instant startup)
+- ✅ Clean slate for initializer sessions (full recreation)
+- ✅ Volume mounts for file persistence
+- ✅ Auto-stop on project completion (December 2025)
+- ✅ Auto-delete on project deletion (December 2025)
+- ✅ Web UI container management (/containers page)
 
----
-
-## Overview
-
-### Problem Statement
-
-When the autonomous agent generates applications that use API keys (e.g., Claude API integration), those environment variables can leak into the parent agent process during testing. This causes:
-
-1. **Authentication conflicts**: Generated app's API keys override agent's credentials
-2. **Session failures**: Subsequent agent sessions use wrong API key
-3. **Security risk**: Secrets from generated apps persist in agent environment
-
-**Example scenario:**
+**Container Lifecycle:**
 ```
-Session 1: Agent generates a chatbot app that uses ANTHROPIC_API_KEY
-Session 2: Agent tests the chatbot by running it
-Session 3: ANTHROPIC_API_KEY from chatbot is now in agent's environment
-Session 4: Agent fails with "credit balance too low" (using chatbot's API key)
-```
-
-### Solution
-
-Execute all agent commands inside isolated Docker containers with:
-- **Separate filesystem** (no path conflicts)
-- **Separate environment variables** (no leakage)
-- **Volume mounts** (file persistence across sessions)
-- **Resource limits** (CPU, memory control)
-- **No session duration limits** (containers run indefinitely)
-
-### Why Docker?
-
-**Advantages for our use case:**
-- ✅ **No session duration limits** - containers run as long as needed (hours, days)
-- ✅ **Zero cloud costs** - runs on local hardware or your own server
-- ✅ **Full control** - direct Docker access for debugging
-- ✅ **Simple architecture** - standard Docker commands everyone knows
-- ✅ **Instant file sync** - volume mounts = zero latency file operations
-- ✅ **Network isolation options** - can restrict outbound access
-- ✅ **Unlimited sessions** - only limited by host resources
-
-**Compared to cloud alternatives:**
-- E2B: Session limits (1hr free, 24hr pro), per-second billing, network latency
-- Managed Kubernetes: Higher complexity, overhead for single-user development
-
-Docker is optimal for long-running autonomous coding sessions where multi-hour unattended operation is required.
-
----
-
-## Architecture
-
-### High-Level Design
-
-```
-┌─────────────────────────────────────────────────────────┐
-│                   Orchestrator                          │
-│  - Manages agent session lifecycle                     │
-│  - Creates/destroys Docker containers per session      │
-└────────────────────┬────────────────────────────────────┘
-                     │
-                     ↓
-┌─────────────────────────────────────────────────────────┐
-│                 Sandbox Manager                         │
-│  - Factory for sandbox instances                       │
-│  - Types: LocalSandbox, DockerSandbox, E2BSandbox      │
-└────────────────────┬────────────────────────────────────┘
-                     │
-                     ↓
-┌─────────────────────────────────────────────────────────┐
-│                 Docker Container                        │
-│  - Image: node:20-slim (configurable)                  │
-│  - Volume: /workspace → project directory               │
-│  - Network: bridge (isolated)                           │
-│  - Limits: 2GB RAM, 2.0 CPU (configurable)             │
-└─────────────────────────────────────────────────────────┘
-```
-
-### Component Flow
-
-```
-1. Session Start
-   └→ Orchestrator.start_session()
-      └→ SandboxManager.create_sandbox(type="docker")
-         └→ DockerSandbox.start()
-            └→ docker run --name autonomous-agent-{project} \
-                         --volume {project_dir}:/workspace \
-                         node:20-slim
-
-2. Agent Execution
-   └→ create_client(docker_container="autonomous-agent-{project}")
-      └→ MCP server receives DOCKER_CONTAINER_NAME env var
-         └→ Agent sees bash_docker tool in system prompt
-            └→ Agent uses bash_docker for all commands
-               └→ docker exec autonomous-agent-{project} /bin/bash -c "{command}"
-
-3. Session End
-   └→ DockerSandbox.stop()
-      └→ docker stop autonomous-agent-{project}
-         └→ docker rm autonomous-agent-{project}
+Initializer → Creates new container → Kept running
+Coding → Reuses container → Kept running
+Coding → Reuses container → Kept running
+Project Complete → ✅ Container auto-stopped (frees ports)
+Project Deleted → ✅ Container auto-deleted (cleanup)
 ```
 
 ---
 
 ## Container Lifecycle
 
-### Current Implementation
+### Current Implementation (Container Reuse)
 
-**Container Recreation Per Session:**
+**✅ IMPLEMENTED:** Containers are reused between sessions for speed.
 
-The current implementation creates a **fresh container for each session**:
+**Initializer Sessions:**
+1. Check for existing container with name `yokeflow-{project}`
+2. If exists → Remove and recreate (clean slate)
+3. Create new container with volume mount
+4. Run setup (install git, curl, build-essential, etc.)
+5. Keep running after session ends
 
-1. **Session N starts:**
-   - Create new `sandbox` object
-   - Call `sandbox.start()`
-   - Remove old container (if exists)
-   - Create fresh container with `sleep infinity`
-   - Run setup: `apt-get update`, install packages (~30-60s)
-   - Mount project directory at `/workspace`
-
-2. **During session:**
-   - Execute commands via `docker exec`
-   - Files sync via volume mount (bidirectional, instant)
-   - Container stays running
-
-3. **Session N ends:**
-   - Container left running (`sleep infinity`)
-   - Files persisted on host (volume mount)
-
-4. **Session N+1 starts:**
-   - **Destroy previous container completely**
-   - Create brand new container
-   - Re-run setup (apt-get, npm, etc.)
-   - Mount same project directory
-
-**Container naming:** `autonomous-agent-{project-name}` (unique per project)
-
-### Why This Design?
-
-- ✅ **Clean slate** - no stale processes, no leftover state
-- ✅ **Reproducibility** - each session starts identically
-- ✅ **No session limit** - containers run indefinitely during session
-- ✅ **Simple lifecycle** - no complex state management
-
-**Tradeoff:** ~30-60 seconds overhead per session for package installation (acceptable for clean environment guarantees)
-
-### Initialization Overhead
-
-From `sandbox_manager.py` - `_setup_container()`:
-
-```bash
-apt-get update -qq
-apt-get install -y -qq git curl build-essential python3 python3-pip procps lsof jq sqlite3
-npm install -g pnpm npm
-```
-
-**Time cost:** ~30-60 seconds per session
-
-### Current Optimizations
-
-**✅ Port Cleanup:**
-```bash
-# Kill stray processes from interrupted sessions
-lsof -ti:5173 | xargs kill -9 2>/dev/null || true
-lsof -ti:3001 | xargs kill -9 2>/dev/null || true
-```
-
-**✅ Container Reuse (within session):**
-- MCP `bash_docker` tool uses `docker exec` (not creating new containers)
-- Same container for entire session = consistent state
-
-**✅ Volume Mounting:**
-- Project directory mounted at `/workspace`
-- Read/Write/Edit tools work on host (no escaping issues)
-- bash_docker runs in container (has all tools)
-
-**✅ Resource Limits:**
-```python
-mem_limit=self.memory_limit,  # Default: 2g
-nano_cpus=int(float(self.cpu_limit) * 1e9),  # Default: 2.0
-```
-
-### Future Optimization Opportunity
-
-**Container Reuse Across Sessions:**
-
-Instead of recreating containers, reuse them:
-
-```python
-# Try to reuse existing container
-try:
-    container = self.client.containers.get(self.container_name)
-    if container.status == 'running':
-        self.container_id = container.id
-        self.is_running = True
-        logger.info(f"Reusing existing container: {self.container_name}")
-        return  # Exit early, don't recreate
-except docker.errors.NotFound:
-    pass  # Container doesn't exist, create below
-```
+**Coding Sessions:**
+1. Check for existing container with name `yokeflow-{project}`
+2. If running → Reuse it (clean up processes only)
+3. If stopped → Restart it
+4. If missing → Create new one
+5. Keep running after session ends
 
 **Benefits:**
-- Eliminate 30-60s package installation overhead
-- Sessions start instantly (just `docker exec`)
-- Preserve installed packages, node_modules, etc.
+- Coding sessions start instantly (<5s vs 30-60s)
+- Packages, node_modules preserved between sessions
+- No repeated apt-get/npm installs
 
-**Tradeoffs:**
-- Stale state could accumulate (orphaned processes, env vars)
-- Need robust cleanup at session start
-- Debugging harder (what's from this session vs previous?)
+**Code Reference:** [sandbox_manager.py:200-258](../sandbox_manager.py#L200-L258)
 
-**Mitigation:**
+### Container Management (December 2025)
+
+**✅ IMPLEMENTED:** Automatic cleanup and manual controls.
+
+**Auto-Stop on Completion:**
+- When all tasks complete, container automatically stopped
+- Frees ports (3000, 5000, etc.) for other projects
+- Preserves environment for potential restart
+- Implemented in `orchestrator.py` (lines 484-498)
+
+**Auto-Delete on Project Deletion:**
+- When project deleted via API, container automatically removed
+- Frees disk space and cleans up Docker Desktop
+- Implemented in `SandboxManager.delete_docker_container()`
+
+**Manual Controls** (/containers page):
+- View all Docker containers across all projects
+- Start/Stop/Delete controls
+- Real-time status display
+- Port mappings display
+- Statistics dashboard
+
+**Benefits:**
+- No port conflicts between projects
+- Reduced resource usage
+- Clean Docker Desktop interface
+- No manual cleanup needed
+
+### Manual Cleanup
+
+**View all containers:**
 ```bash
-# Enhanced cleanup at session start
-docker exec $container pkill -9 node
-docker exec $container pkill -9 npm
-docker exec $container pkill -9 python
-docker exec $container sh -c 'rm -rf /tmp/*'
+docker ps -a --filter "name=yokeflow"
 ```
 
-**Verdict:** Worth implementing for significant time savings (~30-60s per session = 5-10 min/day saved).
+**Remove specific container:**
+```bash
+docker rm -f yokeflow-{project-name}
+```
+
+**Remove all stopped containers:**
+```bash
+docker container prune -f
+```
+
+**Remove all yokeflow containers:**
+```bash
+docker ps -a --filter "name=yokeflow" --format "{{.Names}}" | xargs docker rm -f
+```
+
+---
+
+## Why Docker?
+
+### Problem: Environment Variable Leakage
+
+When agent generates apps with API keys, those environment variables leak into the parent process:
+
+```
+Session 1: Agent generates chatbot with ANTHROPIC_API_KEY
+Session 2: Agent tests chatbot by running it
+Session 3: ANTHROPIC_API_KEY from chatbot now in agent's environment
+Session 4: Agent fails with "credit balance too low" (using chatbot's key)
+```
+
+### Solution: Docker Isolation
+
+- **Separate filesystem** - no path conflicts
+- **Separate environment** - no variable leakage
+- **Volume mounts** - file persistence across sessions
+- **No session limits** - containers run indefinitely
+- **Zero cloud costs** - runs on local hardware
+
+### vs. Cloud Alternatives
+
+| Feature | Docker (Local) | E2B Cloud |
+|---------|---------------|-----------|
+| Session duration | Unlimited | 1hr (free), 24hr (pro) |
+| Cost | $0 | $0.0001/second |
+| Startup time | <5s (reuse) | ~150ms |
+| File sync | Instant (volume mount) | Upload/download |
+| Network latency | None | API calls |
+| Control | Full (docker CLI) | API only |
+
+**Winner:** Docker for long-running autonomous coding sessions.
 
 ---
 
 ## How It Works
 
-### 1. Container Lifecycle Management
+### 1. Container Creation
 
-**File:** `sandbox_manager.py`
+**File:** `sandbox_manager.py` - `DockerSandbox.start()`
 
-**DockerSandbox class:**
-- **start()**: Creates container with project directory mounted as volume
-- **stop()**: Stops and removes container
-- **execute_command()**: Runs commands via `docker exec`
-
-**Key features:**
-- Container name: `autonomous-agent-{project-name}` (unique per project)
-- Volume mount: `{host_path} → /workspace` (bidirectional sync)
-- Working directory: `/workspace` (all commands run here)
-- Auto-cleanup: Old containers removed before creating new ones
-
-**Container configuration:**
 ```python
+# Generate unique name per project
+container_name = f"yokeflow-{project_dir.name}"
+
+# Check for existing container
+try:
+    existing = client.containers.get(container_name)
+
+    # Initializer: Always recreate (clean slate)
+    if session_type == "initializer":
+        existing.remove(force=True)
+        existing = None
+
+    # Coding: Reuse if possible (speed)
+    elif session_type == "coding":
+        if existing.status == "running":
+            # Clean up processes, reuse container
+            await _cleanup_container()
+            return  # Skip creation
+        else:
+            existing.start()  # Restart stopped container
+            return
+
+except docker.errors.NotFound:
+    pass  # Create new container below
+
+# Create new container
 container = client.containers.run(
     image="node:20-slim",
-    command="sleep infinity",  # Keep container alive
-    name=f"autonomous-agent-{project_name}",
+    command="sleep infinity",  # Keep alive
+    name=container_name,
     detach=True,
     volumes={
-        str(project_dir.resolve()): {
+        str(project_dir): {
             "bind": "/workspace",
             "mode": "rw"
         }
@@ -272,982 +187,260 @@ container = client.containers.run(
     working_dir="/workspace",
     mem_limit="2g",
     nano_cpus=2_000_000_000,  # 2.0 CPU
-    environment={
-        "HOME": "/root",
-        "PATH": "/usr/local/sbin:/usr/local/bin:/usr/sbin:/usr/bin:/sbin:/bin"
-    }
 )
 ```
 
-### 2. Custom MCP Tool Approach
+### 2. Process Cleanup (Coding Sessions)
 
-**Why not use SDK hooks?**
+When reusing containers, clean up stale processes:
 
-Initial attempts to intercept the Bash tool via SDK hooks failed because:
+```python
+async def _cleanup_container(self):
+    """Kill orphaned processes from previous sessions."""
+    cleanup_commands = [
+        "pkill -9 node || true",
+        "pkill -9 npm || true",
+        "pkill -9 python || true",
+        "lsof -ti:3001 | xargs kill -9 || true",
+        "lsof -ti:5173 | xargs kill -9 || true",
+    ]
 
-1. **Two-process architecture**: Python agent spawns Node.js CLI subprocess
-2. **Tool execution in CLI**: Bash commands run in Node.js process, not Python
-3. **Hook limitations**: PreToolUse hooks can block but cannot override results
-4. **No communication channel**: Python hooks can't pass results back from Docker
+    for cmd in cleanup_commands:
+        await self.execute_command(cmd)
+```
 
-**See:** `SANDBOX_INVESTIGATION_SUMMARY.md` for full investigation details.
+**Why this matters:**
+- Previous session may have left dev servers running
+- Ports 3001, 5173 may be occupied
+- Kill them before starting new session
 
-**Solution: bash_docker MCP tool**
+### 3. MCP bash_docker Tool
 
-Create a custom tool that explicitly executes commands in Docker:
+Agent uses `bash_docker` tool instead of regular `Bash`:
 
 ```typescript
 // mcp-task-manager/src/index.ts
-{
-  name: 'bash_docker',
-  description: 'Execute a bash command in the Docker sandbox',
-  inputSchema: {
-    type: 'object',
-    properties: {
-      command: {
-        type: 'string',
-        description: 'The bash command to execute'
-      }
-    }
-  }
-}
-```
-
-**Implementation:**
-```typescript
 case 'bash_docker':
-  const containerName = process.env.DOCKER_CONTAINER_NAME;
-  const command = args?.command as string;
+    const containerName = process.env.DOCKER_CONTAINER_NAME;
+    const command = args?.command as string;
 
-  // Execute via docker exec
-  const dockerCommand = `docker exec ${containerName} /bin/bash -c ${JSON.stringify(command)}`;
-  const { stdout, stderr } = await execAsync(dockerCommand);
+    // Execute via docker exec
+    const dockerCommand = `docker exec ${containerName} /bin/bash -c ${JSON.stringify(command)}`;
+    const { stdout, stderr } = await execAsync(dockerCommand);
 
-  return {
-    content: [{
-      type: 'text',
-      text: stdout + stderr
-    }]
-  };
+    return {
+        content: [{ type: 'text', text: stdout + stderr }]
+    };
 ```
 
-**Key insight:** By making it a separate tool, the agent can explicitly choose when to use Docker execution. This is cleaner than trying to override the built-in Bash tool.
+**How agent learns to use it:**
+1. System prompt includes Docker guidance when container active
+2. MCP server registers `bash_docker` tool
+3. Agent sees tool and chooses it automatically
 
-### 3. Agent Instruction via System Prompt
+**Code References:**
+- Tool implementation: [mcp-task-manager/src/index.ts:308-648](../mcp-task-manager/src/index.ts)
+- Agent prompt: [prompts/docker_prompt.md](../prompts/docker_prompt.md)
+- Client config: [client.py:59-150](../client.py)
 
-**File:** `client.py`
-
-When Docker sandbox is active, the system prompt is enhanced with Docker-specific guidance:
-
-```python
-def create_client(project_dir: Path, model: str, docker_container: str = None):
-    # Base system prompt
-    base_prompt = "You are an expert full-stack developer..."
-
-    # Append Docker guidance if sandbox active
-    if docker_container:
-        docker_prompt_path = Path("prompts/docker_prompt.md")
-        docker_guidance = docker_prompt_path.read_text()
-        system_prompt = f"{base_prompt}\n\n{docker_guidance}"
-
-    # Pass container name to MCP server
-    mcp_servers = {
-        "task-manager": {
-            "command": "node",
-            "args": [str(mcp_server_path)],
-            "env": {
-                "DOCKER_CONTAINER_NAME": docker_container,
-                # ...
-            }
-        }
-    }
-```
-
-**Docker guidance content** (`prompts/docker_prompt.md`):
-- **Use bash_docker tool** instead of regular Bash
-- **Avoid heredocs** (they break in docker exec)
-- **Use printf/echo** for file creation (not Write/Edit tools)
-- **Missing utilities** (jq, lsof not in minimal images)
-
-**Why this approach works:**
-1. Agent sees bash_docker tool available
-2. System prompt tells agent to use it
-3. Agent automatically chooses bash_docker (tested in E2E tests)
-4. No explicit prompting needed per command
-
-### 4. Environment Variable Passing
-
-**Container name propagation:**
+### 4. Container Lifecycle Events
 
 ```
-Orchestrator (orchestrator.py)
-  ↓ docker_container="autonomous-agent-myproject"
-create_client (client.py)
-  ↓ env={"DOCKER_CONTAINER_NAME": "autonomous-agent-myproject"}
-MCP Server (mcp-task-manager/src/index.ts)
-  ↓ process.env.DOCKER_CONTAINER_NAME
-bash_docker tool
-  ↓ docker exec autonomous-agent-myproject /bin/bash -c "..."
-```
-
-**Why environment variables?**
-- MCP servers receive environment configuration
-- Clean separation of concerns
-- Easy to add E2B_SANDBOX_ID later for E2B support
-
-### 5. Volume Mount Persistence
-
-**How files persist:**
-
-```
-Session 1:
-  1. Create container with volume mount
-  2. Agent runs: npm init, npm install
-  3. Files written to /workspace → synced to host
-  4. Container destroyed
-
-Session 2:
-  1. Create NEW container with SAME volume mount
-  2. /workspace contains files from Session 1
-  3. node_modules/, package.json already exist
-  4. Agent continues work
-
-Session 3+:
-  ... same pattern
-```
-
-**Benefits:**
-- No manual file sync needed
-- Near-instant bidirectional updates
-- Works with any file size
-- Survives container restarts
-
-**Volume mount configuration:**
-```python
-volumes={
-    str(project_dir.resolve()): {
-        "bind": "/workspace",
-        "mode": "rw"  # read-write
-    }
-}
+Orchestrator.start_session()
+  ↓
+SandboxManager.create_sandbox(type="docker")
+  ↓
+DockerSandbox.start()
+  ├─ Initializer: Remove old → Create new → Setup → Keep running
+  └─ Coding: Reuse/restart → Cleanup processes → Keep running
+  ↓
+Agent session runs (docker exec commands)
+  ↓
+DockerSandbox.stop()
+  └─ Keep container running (for reuse)
 ```
 
 ---
 
-## Implementation Details
+## Configuration
 
-### Files Modified/Created
-
-**Core Implementation:**
-
-| File | Purpose | Lines |
-|------|---------|-------|
-| `sandbox_manager.py` | Sandbox abstraction layer with Docker, Local, E2B backends | 423 |
-| `mcp-task-manager/src/index.ts` | bash_docker tool implementation | 308-648 |
-| `client.py` | Docker-aware client configuration, system prompt enhancement | 59-150 |
-| `orchestrator.py` | Container lifecycle integration with sessions | 406-442 |
-| `prompts/docker_prompt.md` | Agent guidance for Docker-specific workflow | 145 |
-
-**Configuration:**
-
-| File | Purpose |
-|------|---------|
-| `.autonomous-coding.yaml` | Sandbox type, image, resources configuration |
-| `config.py` | Config loading and validation |
-
-**Testing:**
-
-| File | Purpose |
-|------|---------|
-| `tests/test_bash_docker.py` | Direct tool testing (3 commands) |
-| `tests/test_e2e_sandbox.py` | End-to-end agent usage test |
-
-### Configuration Options
-
-**File:** `.autonomous-coding.yaml`
+**File:** `.yokeflow.yaml`
 
 ```yaml
 sandbox:
-  type: docker          # "none", "docker", or "e2b"
+  type: docker              # "none", "docker", or "e2b"
   docker_image: node:20-slim
   docker_network: bridge
   docker_memory_limit: 2g
   docker_cpu_limit: "2.0"
+  docker_ports:
+    - "3001:3001"          # Express backend
+    - "5173:5173"          # Vite frontend
 ```
 
-**Sandbox types:**
+**Sandbox Types:**
 
 | Type | Description | Use Case |
 |------|-------------|----------|
-| `none` / `local` | No isolation, commands run on host | Local development, debugging |
-| `docker` | Docker container isolation | Testing, single-user development |
-| `e2b` | E2B cloud sandbox | Production, multi-tenant deployment |
-
-**Docker image requirements:**
-- Base: Any image with `/bin/bash` and volume mount support
-- Recommended: `node:20-slim` (Node.js apps)
-- Alternative: `python:3.11-slim` (Python apps)
-- Custom: Build your own with required dependencies
-
-**Resource limits:**
-- Memory: Prevents OOM on host (default: 2GB)
-- CPU: Prevents runaway processes (default: 2.0 cores)
-- Adjustable based on project needs
-
-### Docker Client Configuration
-
-**Socket path detection:**
-
-```python
-# Auto-detect Docker socket from context
-result = subprocess.run(['docker', 'context', 'inspect'],
-                       capture_output=True, text=True)
-context = json.loads(result.stdout)[0]
-socket_path = context['Endpoints']['docker']['Host']
-
-# Create client with custom socket
-client = docker.DockerClient(base_url=socket_path)
-```
-
-**Why this matters:**
-- Handles non-standard Docker setups (external SSD, custom paths)
-- Works with Docker Desktop, Colima, or remote Docker
-- Fallback to `docker.from_env()` if context fails
-
-### Container Setup
-
-**Automated dependency installation:**
-
-```python
-async def _setup_container(self):
-    """Install basic dependencies in the container."""
-    setup_commands = [
-        "apt-get update -qq",
-        "apt-get install -y -qq git curl build-essential python3 python3-pip",
-        "npm install -g pnpm npm",
-    ]
-
-    for cmd in setup_commands:
-        result = await self.execute_command(cmd, timeout=120)
-        if result["returncode"] != 0:
-            logger.warning(f"Setup command failed: {cmd}")
-```
-
-**Why this is needed:**
-- Minimal images (node:20-slim) don't include git, curl, etc.
-- Agent may need these for cloning, downloading, building
-- Better to install once at startup than fail mid-session
-
-**Tradeoffs:**
-- ✅ Faster than custom image builds
-- ✅ Flexible (works with any base image)
-- ❌ Adds 30-60s to session startup
-- ❌ Downloads repeated per session
-
-**Alternative:** Build custom image with dependencies baked in:
-```dockerfile
-FROM node:20-slim
-RUN apt-get update && apt-get install -y git curl build-essential
-RUN npm install -g pnpm
-```
-
----
-
-## Agent Integration
-
-### How Agent Learns to Use bash_docker
-
-**Three mechanisms:**
-
-1. **Tool availability** - MCP server registers bash_docker
-2. **System prompt** - Explicit instruction to use bash_docker when Docker active
-3. **Agent intelligence** - Claude chooses appropriate tool automatically
-
-**Evidence from E2E testing:**
-
-```python
-# test_e2e_sandbox.py
-async with client:
-    await client.query("Run the command: pwd")
-
-    async for msg in client.receive_response():
-        if msg_type == "AssistantMessage":
-            for block in msg.content:
-                if block_type == "ToolUseBlock":
-                    tool_name = block.name
-                    # Agent chose bash_docker automatically!
-                    assert tool_name == "mcp__task-manager__bash_docker"
-```
-
-**No explicit "use bash_docker" in the query** - agent inferred from system prompt.
-
-### Prompt Engineering for Docker
-
-**Key challenges solved by prompts/docker_prompt.md:**
-
-1. **Heredoc syntax errors**
-   - Problem: `cat << EOF` breaks in docker exec
-   - Solution: Use `printf 'line\n' >> file` instead
-
-2. **Write/Edit tool failures**
-   - Problem: Tools run on host, can't access /workspace in container
-   - Solution: Use bash_docker with printf/echo for file creation
-
-3. **Missing utilities**
-   - Problem: lsof, jq, fuser not in minimal images
-   - Solution: Use alternatives (curl for port checks, grep for JSON)
-
-**Example guidance:**
-
-```markdown
-### ✅ CORRECT: Use bash_docker with printf
-
-printf 'const express = require("express");\n' > server.js
-printf 'const app = express();\n' >> server.js
-
-### ❌ AVOID: Heredocs
-
-cat > server.js << 'EOF'
-const express = require("express");
-EOF
-```
-
-**Impact measurement:**
-- **Before prompt**: 5-10 trial-and-error attempts per file creation
-- **After prompt**: First attempt usually succeeds
-- **Evidence**: Session 1-2 logs show immediate correct usage
-
-### Error Handling
-
-**Docker command failures:**
-
-```typescript
-try {
-  const { stdout, stderr } = await execAsync(dockerCommand);
-  return { content: [{ type: 'text', text: stdout + stderr }] };
-} catch (error: any) {
-  // Return error with stdout/stderr
-  let errorOutput = error.stdout || error.stderr || error.message;
-  return {
-    content: [{ type: 'text', text: errorOutput }],
-    isError: true
-  };
-}
-```
-
-**Agent receives errors and can retry:**
-- Tool returns error flag
-- Agent sees error message
-- Agent can adjust command and retry
-- Follows standard MCP error pattern
-
----
-
-## Performance Considerations
-
-### Startup Time Comparison
-
-| Approach | Startup Time | Benefits | Tradeoffs |
-|----------|--------------|----------|-----------|
-| **Current (recreate)** | 30-60s | Clean state, reproducible | Overhead per session |
-| **Container reuse** | <5s | Fast, preserves packages | Potential stale state |
-| **Container pooling** | <2s | Instant, pre-warmed | Memory overhead, complexity |
-| **Cloud sandboxes (E2B)** | ~150ms | Managed, scalable | Cost, session limits |
-
-### Cost Comparison
-
-**Scenario:** 20 sessions averaging 1.2 hours each (24-hour project)
-
-| Solution | Setup Cost | Runtime Cost | Total |
-|----------|-----------|--------------|-------|
-| **Docker (current)** | $0 | $0 | **$0** |
-| **Docker (optimized)** | 2-3 hours dev | $0 | **$0** |
-| **E2B Pro** | $150/month | ~$80-100 | **$230-250/month** |
-
-**Winner:** Docker - $0 cost, unlimited sessions, perfect for autonomous workflows.
-
-### File Sync Performance
-
-**Volume mounts (current):**
-- Instant bidirectional updates
-- Works with any file size
-- Zero network latency
-- Native filesystem performance
-
-**Cloud alternatives:**
-- Upload/download overhead
-- Network latency considerations
-- File size limitations
-
-### Resource Isolation
-
-**Docker provides:**
-- Memory limits (default: 2GB)
-- CPU limits (default: 2.0 cores)
-- Network isolation options
-- Filesystem separation
-
-**Monitoring:**
-```python
-# Get container resource usage
-docker stats autonomous-agent-{project}
-```
-
----
-
-## Testing
-
-### Unit Tests
-
-**File:** `tests/test_bash_docker.py`
-
-**What it tests:**
-1. Container name environment variable passing
-2. Command execution in Docker (pwd, whoami, echo)
-3. Output correctness (/workspace path)
-
-**How to run:**
-```bash
-python tests/test_bash_docker.py
-```
-
-**Expected output:**
-```
-✅ Test 1: pwd
-Output: /workspace
-
-✅ Test 2: whoami
-Output: root
-
-✅ Test 3: echo
-Output: Hello from Docker
-```
-
-### Integration Tests
-
-**File:** `tests/test_e2e_sandbox.py`
-
-**What it tests:**
-1. Agent receives Docker system prompt
-2. Agent automatically chooses bash_docker tool
-3. Commands execute in container (not host)
-
-**How to run:**
-```bash
-python tests/test_e2e_sandbox.py
-```
-
-**What to verify:**
-- Agent uses `mcp__task-manager__bash_docker` (not `Bash`)
-- Output shows `/workspace` (not host path)
-- No manual prompting needed
-
-### Real-World Validation
-
-**Test project:** `specs/docker-sandbox-test.txt`
-
-**What it tests:**
-- Small 3-epic todo API project
-- Multiple sessions (initialization + 3-6 coding sessions)
-- File persistence across container restarts
-- Volume mount correctness
-
-**How to run:**
-```bash
-# Via CLI
-python autonomous_agent.py --project-dir generations/docker-test \
-                          --spec specs/docker-sandbox-test.txt
-
-# Via API
-# 1. Create project via Web UI with docker-sandbox-test.txt
-# 2. Start initialization session
-# 3. Start coding sessions
-```
-
-**What to monitor:**
-```bash
-# Watch containers
-watch -n 1 'docker ps | grep autonomous-agent'
-
-# Check container paths
-docker exec autonomous-agent-docker-test pwd
-# Should output: /workspace
-
-# Watch logs
-tail -f generations/docker-test/logs/session_*.txt
-```
-
-### Manual Testing Checklist
-
-**Basic functionality:**
-- [ ] Container created with correct name
-- [ ] Volume mount working (files persist)
-- [ ] Commands return Docker paths (/workspace)
-- [ ] Container cleaned up after session
-
-**Agent behavior:**
-- [ ] Agent uses bash_docker tool automatically
-- [ ] Agent avoids heredocs (uses printf)
-- [ ] Agent handles missing utilities gracefully
-- [ ] Sessions complete without Docker-related errors
-
-**Error handling:**
-- [ ] Container creation failures logged clearly
-- [ ] Command failures returned to agent
-- [ ] Cleanup happens even on errors
-- [ ] Stale containers removed on restart
+| `none` | No isolation (host) | Debugging, local dev |
+| `docker` | Container isolation | Production default |
+| `e2b` | E2B cloud sandbox | Not implemented |
 
 ---
 
 ## Troubleshooting
 
-### Common Issues
-
-#### 1. "Docker daemon not running"
+### "Container already exists"
 
 **Symptom:**
 ```
-Failed to start Docker sandbox: Error while fetching server API version
+Conflict. The container name yokeflow-myproject is already in use
 ```
 
-**Solutions:**
-- Start Docker Desktop / Colima
-- Check `docker ps` works from terminal
-- Verify DOCKER_HOST environment variable
-
-#### 2. "Container already exists"
-
-**Symptom:**
-```
-Conflict. The container name autonomous-agent-myproject is already in use
-```
+**Cause:** Previous session crashed without cleanup
 
 **Solution:**
 ```bash
-# Remove old container
-docker rm -f autonomous-agent-myproject
-
-# Or let the code auto-cleanup (it tries to remove old containers)
+docker rm -f yokeflow-myproject
 ```
 
-**Root cause:** Previous session crashed without cleanup
+The code should handle this automatically, but may fail on crashes.
 
-#### 3. "Permission denied" on volume mount
-
-**Symptom:**
-```
-docker: Error response from daemon: Mounts denied
-```
+### "Permission denied" on volume mount
 
 **Solution:**
 - Docker Desktop: Add project directory to File Sharing settings
-- Linux: Check directory ownership and permissions
+- Linux: Check directory ownership
 - SELinux: May need `:z` suffix on volume mount
 
-#### 4. Agent uses Bash instead of bash_docker
+### Agent uses Bash instead of bash_docker
 
-**Symptom:**
-- Commands execute on host (not in container)
-- Paths show host directory (not /workspace)
-
-**Debug steps:**
-1. Check `docker_container` parameter passed to create_client()
-2. Verify DOCKER_CONTAINER_NAME env var in MCP server
+**Debug:**
+1. Check `docker_container` passed to `create_client()`
+2. Verify `DOCKER_CONTAINER_NAME` env var in MCP server
 3. Check system prompt includes Docker guidance
-4. Look for bash_docker in agent's tool list
+4. Look for `bash_docker` in agent's tool list
 
-**Solution:**
-- Ensure DockerSandbox created and started
-- Verify container name passed through orchestrator → client → MCP
-- Check prompts/docker_prompt.md exists
+**Solution:** Ensure DockerSandbox created and container name passed through orchestrator → client → MCP.
 
-#### 5. "Command not found" in container
+### "Command not found" in container
 
 **Symptom:**
 ```
-/bin/sh: lsof: not found
-/bin/sh: jq: not found
+/bin/sh: git: not found
+/bin/sh: curl: not found
 ```
 
-**Solution:**
-- Install in container: `apt-get install -y lsof jq`
-- Or use alternatives (see prompts/docker_prompt.md)
-- Or build custom image with dependencies
+**Cause:** `node:20-slim` is minimal image
 
-**Best practice:** Add to `_setup_container()` if commonly needed
-
-### Debug Logging
-
-**Enable verbose logging:**
+**Solution:** Dependencies installed automatically in `_setup_container()`. If command missing, add to setup:
 
 ```python
-import logging
-logging.basicConfig(level=logging.DEBUG)
+async def _setup_container(self):
+    setup_commands = [
+        "apt-get update -qq",
+        "apt-get install -y -qq git curl build-essential python3 python3-pip",
+        "npm install -g pnpm npm",
+    ]
 ```
-
-**Key log messages:**
-
-```
-INFO - DockerSandbox started: autonomous-agent-myproject (ID: abc123...)
-INFO - [bash_docker] Executing in container: pwd
-INFO - [bash_docker] Command executed successfully
-INFO - DockerSandbox stopped: autonomous-agent-myproject
-```
-
-**MCP server logs:**
-
-```bash
-# Check stderr from task-manager MCP server
-# Logged to Claude SDK output
-[bash_docker] Executing in container autonomous-agent-myproject: npm install
-```
-
-### Inspecting Containers
-
-**List running containers:**
-```bash
-docker ps | grep autonomous-agent
-```
-
-**Execute command in container:**
-```bash
-docker exec autonomous-agent-myproject pwd
-docker exec autonomous-agent-myproject ls -la /workspace
-```
-
-**View container logs:**
-```bash
-docker logs autonomous-agent-myproject
-```
-
-**Inspect container configuration:**
-```bash
-docker inspect autonomous-agent-myproject | jq '.[0].Mounts'
-docker inspect autonomous-agent-myproject | jq '.[0].HostConfig.Memory'
-```
-
----
-
-## Extending the System
-
-### Adding E2B Support
-
-**File:** `sandbox_manager.py`
-
-**Current stub:**
-```python
-class E2BSandbox(Sandbox):
-    async def start(self):
-        raise NotImplementedError("E2B sandbox not yet implemented")
-```
-
-**Implementation steps:**
-
-1. **Install E2B SDK:**
-   ```bash
-   pip install e2b
-   ```
-
-2. **Implement start():**
-   ```python
-   from e2b import Sandbox
-
-   async def start(self):
-       self.e2b_sandbox = Sandbox(
-           template="nodejs",
-           timeout=3600  # 1 hour
-       )
-
-       # Upload project files
-       await self.sync_directory("to_sandbox")
-
-       self.is_running = True
-   ```
-
-3. **Implement execute_command():**
-   ```python
-   async def execute_command(self, command, timeout=None):
-       result = await self.e2b_sandbox.run(
-           f"cd /workspace && {command}",
-           timeout=timeout
-       )
-       return {
-           "stdout": result.stdout,
-           "stderr": result.stderr,
-           "returncode": result.exit_code
-       }
-   ```
-
-4. **Add MCP tool:**
-   ```typescript
-   // Similar to bash_docker but for E2B
-   case 'bash_e2b':
-       const sandboxId = process.env.E2B_SANDBOX_ID;
-       // Call E2B API via SDK
-   ```
-
-5. **Update configuration:**
-   ```yaml
-   sandbox:
-     type: e2b
-     e2b_api_key: ${E2B_API_KEY}
-     e2b_template: nodejs
-   ```
-
-**Challenges:**
-- E2B has session limits (1 hour free, 24 hour pro)
-- Need to handle pause/resume for long projects
-- File upload/download instead of volume mounts
-- Cost considerations ($0.0001 per second)
-
-### Adding Custom Docker Images
-
-**Why custom images?**
-- Pre-install dependencies (faster startup)
-- Include project-specific tools
-- Optimize for specific stacks (Python, Go, Rust)
-
-**Example: Python-focused image**
-
-```dockerfile
-# Dockerfile.python
-FROM python:3.11-slim
-
-# Install system dependencies
-RUN apt-get update && apt-get install -y \
-    git curl build-essential \
-    postgresql-client redis-tools \
-    && rm -rf /var/lib/apt/lists/*
-
-# Install common Python tools
-RUN pip install --no-cache-dir \
-    poetry pytest black ruff mypy
-
-WORKDIR /workspace
-CMD ["sleep", "infinity"]
-```
-
-**Build and configure:**
-```bash
-docker build -f Dockerfile.python -t autonomous-agent-python:latest .
-```
-
-```yaml
-# .autonomous-coding.yaml
-sandbox:
-  type: docker
-  docker_image: autonomous-agent-python:latest
-```
-
-### Adding Resource Monitoring
-
-**Goal:** Track resource usage per session
-
-**Implementation:**
-
-```python
-class DockerSandbox(Sandbox):
-    async def get_stats(self) -> Dict[str, Any]:
-        """Get container resource usage statistics."""
-        if not self.container_id:
-            return {}
-
-        container = self.client.containers.get(self.container_id)
-        stats = container.stats(stream=False)
-
-        return {
-            "cpu_percent": self._calculate_cpu_percent(stats),
-            "memory_usage_mb": stats['memory_stats']['usage'] / 1024 / 1024,
-            "memory_limit_mb": stats['memory_stats']['limit'] / 1024 / 1024,
-            "network_rx_bytes": stats['networks']['eth0']['rx_bytes'],
-            "network_tx_bytes": stats['networks']['eth0']['tx_bytes'],
-        }
-```
-
-**Track in database:**
-```python
-# orchestrator.py
-async def start_session(...):
-    # ... session execution ...
-
-    # Get final stats
-    stats = await sandbox.get_stats()
-    metrics["resource_usage"] = stats
-
-    await db.end_session(session_id, ..., metrics=metrics)
-```
-
-**Visualize in Web UI:**
-- CPU usage graph per session
-- Memory usage trends
-- Network bandwidth tracking
-- Alert on resource limit hits
-
-### Adding Network Isolation
-
-**Current:** Bridge network (containers can access internet)
-
-**Options:**
-
-1. **No network:**
-   ```python
-   container = client.containers.run(
-       ...,
-       network_mode="none"
-   )
-   ```
-   - ✅ Complete isolation
-   - ❌ Can't download dependencies
-
-2. **Custom network with firewall:**
-   ```bash
-   docker network create --driver bridge \
-       --subnet=172.20.0.0/16 \
-       autonomous-agent-net
-   ```
-   ```python
-   container = client.containers.run(
-       ...,
-       network="autonomous-agent-net"
-   )
-   ```
-   - ✅ Control egress rules
-   - ✅ Block specific domains
-   - ⚠️ Requires Docker network setup
-
-3. **HTTP proxy:**
-   ```python
-   environment={
-       "HTTP_PROXY": "http://proxy:3128",
-       "HTTPS_PROXY": "http://proxy:3128"
-   }
-   ```
-   - ✅ Log all HTTP requests
-   - ✅ Block malicious domains
-   - ❌ Doesn't affect non-HTTP traffic
-
-### Adding Snapshot/Restore
-
-**Use case:** Save container state between sessions for faster restarts
-
-**Implementation:**
-
-```python
-class DockerSandbox(Sandbox):
-    async def snapshot(self, tag: str) -> str:
-        """Create snapshot of current container state."""
-        if not self.container_id:
-            raise RuntimeError("No container running")
-
-        container = self.client.containers.get(self.container_id)
-
-        # Commit container to image
-        image = container.commit(
-            repository=f"autonomous-agent-snapshot",
-            tag=tag
-        )
-
-        return image.id
-
-    async def restore(self, snapshot_id: str) -> None:
-        """Start container from snapshot."""
-        container = self.client.containers.run(
-            snapshot_id,
-            command="sleep infinity",
-            detach=True,
-            volumes=self.volumes,
-            # ... same config as start()
-        )
-
-        self.container_id = container.id
-        self.is_running = True
-```
-
-**Use in orchestrator:**
-```python
-# After initialization session
-snapshot_id = await sandbox.snapshot(tag="post-init")
-await db.update_project(project_id, snapshot_id=snapshot_id)
-
-# In coding sessions
-if project.get('snapshot_id'):
-    await sandbox.restore(project['snapshot_id'])
-else:
-    await sandbox.start()
-```
-
-**Benefits:**
-- Skip npm install between sessions (15-60s saved)
-- Preserve installed dependencies
-- Faster session startup (2-5s vs 30-60s)
-
-**Tradeoffs:**
-- Disk usage (snapshots can be large)
-- Requires cleanup policy
-- Complexity in state management
 
 ---
 
 ## Future Enhancements
 
-### Container Reuse Across Sessions
+### Container Cleanup Automation
 
-**Goal:** Eliminate 30-60s initialization overhead
+**Goal:** Automatically remove containers when projects complete or are deleted.
 
-**Benefits:**
-- Sessions start instantly (just `docker exec`)
-- Preserve installed packages, node_modules
-- 5-10 minutes saved per day
+**Implementation:**
 
-**Implementation:** Modify `sandbox_manager.py` to check for existing running containers before recreating
+1. **Project completion hook:**
+```python
+# orchestrator.py - after project complete
+async def start_coding_sessions(...):
+    if completed_tasks >= total_tasks:
+        await db.mark_project_complete(project_id)
 
-**Effort:** 2-3 hours implementation + testing
+        # NEW: Cleanup container
+        container_name = f"yokeflow-{project_name}"
+        await cleanup_container(container_name)
+```
+
+2. **Project deletion hook:**
+```python
+# orchestrator.py - delete_project()
+async def delete_project(self, project_id: UUID) -> bool:
+    # ... existing code ...
+
+    # NEW: Cleanup container
+    container_name = f"yokeflow-{project_name}"
+    await cleanup_container(container_name)
+
+    return True
+```
+
+3. **Cleanup utility:**
+```python
+async def cleanup_container(container_name: str) -> None:
+    """Remove Docker container for project."""
+    import docker
+    client = docker.from_env()
+
+    try:
+        container = client.containers.get(container_name)
+        container.remove(force=True)
+        logger.info(f"Removed container: {container_name}")
+    except docker.errors.NotFound:
+        pass  # Already removed
+```
+
+**Effort:** 1-2 hours
+
+### Cleanup Commands
+
+**Goal:** Utility to remove orphaned containers.
+
+```bash
+# Remove containers for deleted projects
+python scripts/cleanup_containers.py
+
+# Remove all stopped containers
+python scripts/cleanup_containers.py --stopped
+
+# Force remove all (including running)
+python scripts/cleanup_containers.py --all --force
+```
+
+**Effort:** 2-3 hours
 
 ### Resource Monitoring
 
-**Goal:** Track CPU, memory, network usage per session
+**Goal:** Track CPU/memory usage per session.
 
-**Implementation:**
-- Add `get_stats()` method to DockerSandbox
-- Store metrics in sessions table
-- Display in Web UI
+```python
+async def get_stats(self) -> Dict[str, Any]:
+    """Get container resource usage."""
+    container = self.client.containers.get(self.container_id)
+    stats = container.stats(stream=False)
 
-**Effort:** 4-6 hours
-
-### Snapshot/Restore
-
-**Goal:** Save container state after initialization, restore for coding sessions
-
-**Benefits:**
-- Skip npm install between sessions (15-60s saved)
-- Preserve development environment setup
-
-**Implementation:**
-- Use `container.commit()` after initialization
-- Restore from image ID for coding sessions
+    return {
+        "cpu_percent": calculate_cpu_percent(stats),
+        "memory_mb": stats['memory_stats']['usage'] / 1024 / 1024,
+        "network_rx_bytes": stats['networks']['eth0']['rx_bytes'],
+    }
+```
 
 **Effort:** 4-6 hours
-
-### Network Isolation
-
-**Goal:** Restrict outbound network access from containers
-
-**Options:**
-- Custom Docker network with firewall rules
-- HTTP proxy for logging and filtering
-- Whitelist for npm, github, etc.
-
-**Effort:** 6-8 hours
 
 ---
 
 ## Related Documentation
 
-- **Configuration**: [configuration.md](configuration.md) - Sandbox configuration options
-- **MCP Tools**: [mcp-usage.md](mcp-usage.md) - MCP tool development
-- **Docker Prompt**: [../prompts/docker_prompt.md](../prompts/docker_prompt.md) - Agent guidance for Docker
-- **macOS Docker**: [macOS-docker-stability.md](macOS-docker-stability.md) - macOS-specific setup
+- [Configuration](configuration.md) - Sandbox configuration options
+- [MCP Usage](mcp-usage.md) - MCP tool development
+- [Docker Prompt](../prompts/docker_prompt.md) - Agent guidance for Docker
+- [Authentication](authentication.md) - Web UI security
 
 ---
 
-**Questions or issues?** Open a GitHub issue or check the related documentation above.
+**Questions or issues?** Check existing containers with `docker ps -a --filter "name=yokeflow"` and clean up manually if needed.

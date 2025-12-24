@@ -23,6 +23,47 @@ Bash({ command: "npm install express" })
 Bash({ command: "(cd server && npm run migrate)" })
 ```
 
+### ⚠️ Background Bash Processes - CRITICAL
+
+**Background bash processes are RISKY and should be avoided for long-running servers.**
+
+**Known Issue - Timeout Errors Are Silent:**
+- Background bash has a timeout (typically 10-30 seconds)
+- If timeout is exceeded, process is aborted BUT no error is returned to you
+- Session continues without knowing the background process failed
+- This is a Claude Code bug (error should surface but doesn't)
+
+**When to use background bash:**
+- ✅ Quick background tasks (build scripts, cleanup, short tests)
+- ✅ Processes that complete within timeout
+- ✅ Tasks where failure is non-critical
+
+**When NOT to use background bash:**
+- ❌ Development servers (npm run dev, npm start, etc.)
+- ❌ Long-running processes that may exceed timeout
+- ❌ Critical infrastructure where you need to know if it fails
+
+**Correct approach for dev servers:**
+```bash
+# ❌ WRONG - Will timeout silently after 10-30 seconds
+Bash({
+  command: "npm run dev",
+  run_in_background: true,
+  timeout: 10000
+})
+
+# ✅ CORRECT - Start servers via init.sh BEFORE session
+Bash({ command: "./init.sh" })  # Starts servers properly
+Bash({ command: "sleep 3" })     # Wait for startup
+Bash({ command: "curl -s http://localhost:5173 && echo 'Ready'" })  # Verify
+```
+
+**If you must use background bash:**
+1. Set generous timeout (60000ms minimum for any server)
+2. Verify process started successfully immediately after
+3. Document assumption that process may have failed silently
+4. Have fallback plan if background process isn't running
+
 ---
 
 ## 🔧 SERVER LIFECYCLE MANAGEMENT (LOCAL MODE)
@@ -121,11 +162,9 @@ curl -s http://localhost:5173 > /dev/null 2>&1 && echo "✅ Frontend still runni
 
 # Coding Agent Prompt (v6.3 - Context Management & No Summary Files)
 
-**v6.3 (Dec 15, 2024):** Explicit context management (stop at 45 messages) + ban summary file creation
-**v6.2 (Dec 14, 2024):** Docker-specific fixes - path rules, timing, port checking, snapshot lifecycle
-**v6.1 (Dec 14, 2024):** Screenshot buffer overflow fix - ban fullPage screenshots
-**v6.0 (Dec 13, 2024):** Multi-task mode for Docker, 40% token reduction, condensed guidance
-**v5.1 (Dec 12, 2024):** Git commit granularity, task batching guidance
+**v6.3 (Dec 15, 2025):** Explicit context management (stop at 45 messages) + ban summary file creation
+**v6.1 (Dec 14, 2025):** Screenshot buffer overflow fix - ban fullPage screenshots
+**v5.1 (Dec 12, 2025):** Git commit granularity, task batching guidance
 
 ---
 
@@ -157,24 +196,18 @@ Continue until you hit a stopping condition:
 - Stay in project root (use subshells: `(cd server && npm test)`)
 - Never `cd` permanently - you'll lose access to root files
 
-**File Operations (Docker mode):**
+**File Operations:**
 - Read/Write/Edit tools: Use **relative paths** (`server/routes/api.js`)
-- Never use `/workspace/` prefix (container path, not host path)
-- bash_docker tool: Runs in container, uses `/workspace/` internally
-
-**Docker Path Rules (CRITICAL):**
-- ❌ **NEVER use absolute host paths:** `/Volumes/...`, `/Users/...`, etc. don't exist in container
-- ❌ **NEVER use:** `cd $(git rev-parse --show-toplevel)` - returns host path, not container path
-- ✅ **Git commands work from current directory:** Already in `/workspace/`, just use `git add .`
+- All operations work directly on host filesystem
+- ✅ **Git commands work from current directory:** Just use `git add .`
 - ✅ **For temporary directory changes:** Use subshells: `(cd server && npm test)`
-- **Why:** Docker container has different filesystem. Host paths ≠ container paths.
 
 **Context Management (CRITICAL):**
 - **Check message count BEFORE starting each new task** - Look at "Assistant Message N" in your recent responses
 - **If you've sent 45+ messages this session:** STOP and wrap up (approaching 150K token compaction limit)
 - **If you've sent 35-44 messages:** Finish current task only, then commit and stop
 - **NEVER start a new task if message count is high** - Complete current task, commit, and stop
-- **Why:** Context compaction at ~50 messages loses critical Docker guidance (bash_docker tool selection)
+- **Why:** Context compaction at ~50 messages loses critical context and guidance
 - **Better to:** Stop cleanly and let next session continue with fresh context
 - **Red flags:** If you see `compact_boundary` messages, you've gone too far - should have stopped 10 messages earlier
 
@@ -198,20 +231,19 @@ git log --oneline -10
 
 ## STEP 2: MANAGE SERVER LIFECYCLE
 
-**Mode-specific instructions - see your preamble file for detailed guidance:**
+**Local Mode - Server Management:**
 
-- **Docker Mode:** Kill all servers at START and END (port forwarding reset needed)
-- **Local Mode:** Keep servers running, use health checks (better UX, faster startup)
+Keep servers running between sessions, use health checks (better UX, faster startup).
 
 **Quick reference:**
 
 ```bash
-# Check server status (both modes)
+# Check server status
 curl -s http://localhost:3001/health && echo "Backend running" || echo "Backend down"
 curl -s http://localhost:5173 > /dev/null 2>&1 && echo "Frontend running" || echo "Frontend down"
 ```
 
-**See your preamble for mode-specific server management commands.**
+**See preamble for detailed server management commands.**
 
 ---
 
@@ -231,7 +263,7 @@ chmod +x init.sh && ./init.sh
 ```
 
 **Key differences:**
-- **Docker:** Wait 8+ seconds (slower I/O), use health check loop
+- Wait for servers to be ready, use health check loop
 - **Local:** Wait 3 seconds, servers start faster
 
 **NEVER navigate to http://localhost:5173 with Playwright until health check passes!**
@@ -273,11 +305,11 @@ For each task:
 
 2. **Implement:** Follow task's `action` field instructions
    - Use Write/Edit tools for files (relative paths!)
-   - Use bash_docker for commands
+   - Use Bash for commands
    - Handle errors gracefully
 
 3. **Restart servers if backend changed (see preamble for mode-specific commands):**
-   - Docker: Use `pkill -f 'node.*index.js'` then restart
+   - Local: Use `lsof -ti:3001 | xargs kill -9` then restart (targeted, safe)
    - Local: Use `lsof -ti:3001 | xargs kill -9` (targeted, doesn't kill Web UI)
 
 4. **Verify with browser (MANDATORY - every task, no exceptions):**
@@ -387,7 +419,7 @@ git status
 ```
 
 **Server cleanup (mode-specific - see preamble):**
-- **Docker Mode:** Kill all servers (mandatory - port forwarding reset)
+- Clean up servers at session end
 - **Local Mode:** Keep servers running (better UX for next session)
 
 Session complete. Agent will auto-continue to next session if configured.
@@ -501,7 +533,6 @@ browser_click({ ref: "e52" })  // Use ref from snapshot2
 - `update_task_status` - Mark task complete
 
 **Commands:**
-- `bash_docker` - Run commands in container (Docker mode only)
 
 **Never:** Delete epics/tasks, edit descriptions. Only update status.
 
@@ -517,7 +548,7 @@ browser_click({ ref: "e52" })  // Use ref from snapshot2
 **✅ Context Limit:**
 - **45+ messages sent this session** - STOP NOW (approaching ~50 message compaction at 150K+ tokens)
 - **35-44 messages** - Finish current task only, then commit and stop (don't start new task)
-- Better to stop cleanly than hit compaction (loses Docker guidance, causes tool selection errors)
+- Better to stop cleanly than hit compaction (prevents context loss)
 - Commit current work, update progress, let next session continue with fresh context
 
 **✅ Work Type Change:**
@@ -537,7 +568,7 @@ browser_click({ ref: "e52" })  // Use ref from snapshot2
 
 ---
 
-## DOCKER TROUBLESHOOTING
+## TROUBLESHOOTING
 
 **Connection Refused Errors (`ERR_CONNECTION_REFUSED`, `ERR_CONNECTION_RESET`):**
 - Cause: Server not fully started yet
@@ -546,7 +577,7 @@ browser_click({ ref: "e52" })  // Use ref from snapshot2
 
 **Native Module Errors (better-sqlite3, etc.):**
 - Symptom: Vite parse errors, module load failures on first start
-- Cause: Native modules compiled on host don't work in Docker container
+- Solution: Rebuild dependencies in project directory
 - Fix: `(cd server && npm rebuild better-sqlite3)` then restart servers
 - This is normal, not a code bug
 
@@ -556,9 +587,9 @@ browser_click({ ref: "e52" })  // Use ref from snapshot2
 - Database may not have tests for all tasks
 
 **Port Already In Use:**
-- Use `pkill` commands from STEP 2
+- Use `lsof -ti:PORT | xargs kill -9` commands from STEP 2 (safe, port-specific)
 - Verify with curl health checks
-- Wait 1 second after pkill before restarting
+- Wait 1 second after kill before restarting
 
 ---
 
@@ -583,10 +614,6 @@ browser_click({ ref: "e52" })  // Use ref from snapshot2
 - ❌ Don't create TASK_*_VERIFICATION.md files
 - ❌ Logs already capture everything
 
-**Path Correctness (Docker):**
-- ✅ Read/Write/Edit: Relative paths (`server/file.js`)
-- ❌ Never use `/workspace/` with Read/Write/Edit
-- ✅ bash_docker: Runs in container automatically
 
 **Database:**
 - ✅ Use MCP tools for all task tracking

@@ -3,7 +3,7 @@
 Database Initialization Script
 ==============================
 
-Initialize PostgreSQL database for the autonomous coding agent.
+Initialize PostgreSQL database for YokeFlow.
 Creates database, runs schema, and sets up initial configuration.
 
 Usage:
@@ -14,6 +14,7 @@ import asyncio
 import asyncpg
 import os
 import sys
+import subprocess
 from pathlib import Path
 import argparse
 import logging
@@ -21,7 +22,7 @@ import logging
 # Add parent directory to path for imports
 sys.path.append(str(Path(__file__).parent.parent))
 
-from database import TaskDatabase
+from core.database import TaskDatabase
 
 logging.basicConfig(level=logging.INFO, format='%(asctime)s - %(levelname)s - %(message)s')
 logger = logging.getLogger(__name__)
@@ -74,64 +75,51 @@ async def create_database_if_not_exists(connection_url: str) -> None:
 
 
 async def run_schema(connection_url: str, schema_file: Path) -> None:
-    """Run schema SQL file."""
+    """Run schema SQL file.
+
+    Tries to use docker exec psql first (more reliable parsing),
+    falls back to direct execution if docker not available.
+    """
     if not schema_file.exists():
         raise FileNotFoundError(f"Schema file not found: {schema_file}")
 
     logger.info(f"Running schema from {schema_file}")
 
-    # Read schema
-    schema_sql = schema_file.read_text()
+    # Try using docker exec psql (most reliable for complex SQL)
+    try:
+        # Read schema content
+        schema_sql = schema_file.read_text()
 
-    # Connect and run schema
+        # Try docker exec approach
+        result = subprocess.run(
+            ['docker', 'exec', '-i', 'yokeflow_postgres', 'psql', '-U', 'agent', '-d', 'yokeflow'],
+            input=schema_sql,
+            capture_output=True,
+            text=True,
+            check=True,
+            timeout=30
+        )
+        logger.info("Schema executed successfully via docker exec")
+        return
+    except (subprocess.CalledProcessError, FileNotFoundError, subprocess.TimeoutExpired) as e:
+        logger.debug(f"Docker exec psql not available or failed: {e}, falling back to direct connection")
+
+    # Fallback: Direct connection with asyncpg
+    # Execute the entire schema as a single transaction
     conn = await asyncpg.connect(connection_url)
 
     try:
-        # Split by semicolons but be careful with functions/triggers
-        statements = []
-        current = []
-        in_function = False
+        # Read schema
+        schema_sql = schema_file.read_text()
 
-        for line in schema_sql.split('\n'):
-            if '$$' in line:
-                in_function = not in_function
-            current.append(line)
-
-            if ';' in line and not in_function:
-                statements.append('\n'.join(current))
-                current = []
-
-        if current:
-            statements.append('\n'.join(current))
-
-        # Execute each statement
-        for i, statement in enumerate(statements, 1):
-            statement = statement.strip()
-            if statement and not statement.startswith('--'):
-                try:
-                    await conn.execute(statement)
-                    logger.debug(f"Executed statement {i}/{len(statements)}")
-                except (asyncpg.exceptions.DuplicateObjectError,
-                        asyncpg.exceptions.DuplicateTableError,
-                        asyncpg.exceptions.DuplicateDatabaseError) as e:
-                    # Ignore if object already exists (types, tables, indexes, etc)
-                    logger.debug(f"Object already exists (statement {i}): {str(e)[:100]}")
-                except Exception as e:
-                    # Check if it's an index/constraint that already exists
-                    error_msg = str(e).lower()
-                    if any(phrase in error_msg for phrase in [
-                        'already exists',
-                        'duplicate key',
-                        'already been defined'
-                    ]):
-                        logger.debug(f"Skipping existing object (statement {i}): {str(e)[:100]}")
-                    else:
-                        logger.error(f"Error in statement {i}: {e}")
-                        logger.error(f"Statement: {statement[:200]}...")
-                        raise
+        # Remove comments and execute as single block
+        # asyncpg can handle multi-statement execution
+        await conn.execute(schema_sql)
 
         logger.info("Schema executed successfully")
-
+    except Exception as e:
+        logger.error(f"Schema execution failed: {e}")
+        raise
     finally:
         await conn.close()
 
@@ -249,7 +237,7 @@ async def main():
 
     # Determine connection URL
     if args.docker:
-        connection_url = "postgresql://agent:agent_dev_password@localhost:5432/autonomous_coding"
+        connection_url = "postgresql://agent:agent_dev_password@localhost:5432/yokeflow"
     elif args.url:
         connection_url = args.url
     elif os.getenv("DATABASE_URL"):

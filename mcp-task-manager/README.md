@@ -13,7 +13,7 @@ This MCP server provides structured task management capabilities through a **Pos
 
 **Architecture:** TypeScript MCP server with `pg` (node-postgres) for database operations and connection pooling.
 
-**Status:** Production-ready (PostgreSQL migration complete, December 2024)
+**Status:** Production-ready (PostgreSQL migration complete, December 2025)
 
 ## Features
 
@@ -80,7 +80,7 @@ psql $DATABASE_URL -c "\dt"
 The MCP server is automatically configured by `client.py` when sessions start. It receives two critical environment variables:
 
 ```bash
-DATABASE_URL="postgresql://user:pass@host:5432/autonomous_coding"
+DATABASE_URL="postgresql://user:pass@host:5432/yokeflow"
 PROJECT_ID="550e8400-e29b-41d4-a716-446655440000"
 ```
 
@@ -219,10 +219,12 @@ python tests/test_mcp.py           # Full integration tests
 python tests/test_mcp_direct.py    # Direct MCP server tests
 ```
 
-**3. Via Agent Sessions:**
+**3. Via Web UI Sessions:**
 ```bash
-# Start a coding session and observe MCP tool calls
-python autonomous_agent.py --project-dir test-project --verbose
+# Start API server and create project via Web UI
+uvicorn api.main:app --host 0.0.0.0 --port 8000
+# Then use Web UI at http://localhost:3000 to start sessions
+# Observe MCP tool calls in API server logs
 ```
 
 ### Debugging
@@ -328,11 +330,11 @@ mcp__task-manager__update_task_status(task_id=42, completed=True)
 | `task-helper.sh pass-test <id>` | `update_test_result` |
 | `task-helper.sh expand-epic` | `expand_epic` |
 
-✅ **Migration Complete:** Shell script deleted, MCP-only mode (December 2024)
+✅ **Migration Complete:** Shell script deleted, MCP-only mode (December 2025)
 
 ## Version History
 
-**v2.0.0** (December 2024)
+**v2.0.0** (December 2025)
 - ✅ PostgreSQL migration complete
 - ✅ Async operations with connection pooling
 - ✅ UUID-based project identification

@@ -21,7 +21,7 @@ from pathlib import Path
 # Add parent directory to path so we can import database
 sys.path.insert(0, os.path.dirname(os.path.dirname(os.path.abspath(__file__))))
 
-from database import TaskDatabase
+from core.database import TaskDatabase
 
 # Load .env file if it exists
 def load_env():
@@ -241,7 +241,7 @@ async def main():
     """Main entry point."""
 
     # Get database URL from environment
-    db_url = os.getenv('DATABASE_URL', 'postgresql://localhost/autonomous_coding')
+    db_url = os.getenv('DATABASE_URL', 'postgresql://localhost/yokeflow')
     db = TaskDatabase(db_url)
     await db.connect()
 

@@ -185,6 +185,47 @@ mcp__task-manager__bash_docker({ command: "curl -s http://localhost:3001/health"
 mcp__task-manager__bash_docker({ command: "git add . && git commit -m 'message'" })
 ```
 
+### ⚠️ Background Bash Processes - CRITICAL
+
+**Background bash processes are RISKY and should be avoided for long-running servers.**
+
+**Known Issue - Timeout Errors Are Silent:**
+- Background bash has a timeout (typically 10-30 seconds)
+- If timeout is exceeded, process is aborted BUT no error is returned to you
+- Session continues without knowing the background process failed
+- This is a Claude Code bug (error should surface but doesn't)
+
+**When to use background bash:**
+- ✅ Quick background tasks (build scripts, cleanup, short tests)
+- ✅ Processes that complete within timeout
+- ✅ Tasks where failure is non-critical
+
+**When NOT to use background bash:**
+- ❌ Development servers (npm run dev, npm start, etc.)
+- ❌ Long-running processes that may exceed timeout
+- ❌ Critical infrastructure where you need to know if it fails
+
+**Correct approach for dev servers:**
+```bash
+# ❌ WRONG - Will timeout silently after 10-30 seconds
+Bash({
+  command: "npm run dev",
+  run_in_background: true,
+  timeout: 10000
+})
+
+# ✅ CORRECT - Start servers via init.sh BEFORE session
+bash_docker({ command: "./init.sh" })  # Starts servers properly
+bash_docker({ command: "sleep 8" })     # Wait for startup
+bash_docker({ command: "curl -s http://localhost:5173 && echo 'Ready'" })  # Verify
+```
+
+**If you must use background bash:**
+1. Set generous timeout (60000ms minimum for any server)
+2. Verify process started successfully immediately after
+3. Document assumption that process may have failed silently
+4. Have fallback plan if background process isn't running
+
 ### 🚫 Tool Restrictions
 
 **ONLY use bash_docker for commands. Do NOT use:**
@@ -285,17 +326,16 @@ bash_docker({ command: "npm install" })  // File is already there!
 **Always kill all servers before starting work:**
 
 ```bash
-# Kill ALL node/vite processes (including from previous sessions)
-# NOTE: pkill commands may show "Command failed" error - this is EXPECTED and SAFE to ignore
-# The error occurs because processes were successfully killed (exit code 143 = SIGTERM)
-# This is Docker's way of reporting the process termination, not an actual failure
-mcp__task-manager__bash_docker({ command: "pkill -f 'node.*index.js' 2>/dev/null; exit 0" })
-mcp__task-manager__bash_docker({ command: "pkill -f 'vite|npm run dev' 2>/dev/null; exit 0" })
+# Kill servers by port (SAFE - won't kill MCP task-manager or other infrastructure)
+# This uses lsof to find processes listening on specific ports
+mcp__task-manager__bash_docker({ command: "lsof -ti:3001 | xargs -r kill -9 2>/dev/null; exit 0" })  # Backend API
+mcp__task-manager__bash_docker({ command: "lsof -ti:5173 | xargs -r kill -9 2>/dev/null; exit 0" })  # Vite frontend
+mcp__task-manager__bash_docker({ command: "lsof -ti:3000 | xargs -r kill -9 2>/dev/null; exit 0" })  # Alternative frontend port
 mcp__task-manager__bash_docker({ command: "sleep 1" })
 
-# Verify all stopped (THIS is the real check - not the pkill errors above)
-mcp__task-manager__bash_docker({ command: "curl -s http://localhost:3001/health && echo '⚠️ Backend still running' || echo '✅ All stopped'" })
-mcp__task-manager__bash_docker({ command: "curl -s http://localhost:5173 > /dev/null 2>&1 && echo '⚠️ Frontend still running' || echo '✅ All stopped'" })
+# Verify all stopped
+mcp__task-manager__bash_docker({ command: "curl -s http://localhost:3001/health && echo '⚠️ Backend still running' || echo '✅ Backend stopped'" })
+mcp__task-manager__bash_docker({ command: "curl -s http://localhost:5173 > /dev/null 2>&1 && echo '⚠️ Frontend still running' || echo '✅ Frontend stopped'" })
 ```
 
 **Then start fresh servers:**
@@ -317,15 +357,13 @@ mcp__task-manager__bash_docker({
 **Always kill all servers cleanly:**
 
 ```bash
-# Stop all servers
-# NOTE: pkill commands may show "Command failed" error - this is EXPECTED and SAFE to ignore
-# The error occurs because processes were successfully killed (exit code 143 = SIGTERM)
-# This is Docker's way of reporting the process termination, not an actual failure
-mcp__task-manager__bash_docker({ command: "pkill -f 'node.*index.js' 2>/dev/null; exit 0" })
-mcp__task-manager__bash_docker({ command: "pkill -f 'vite|npm run dev' 2>/dev/null; exit 0" })
+# Stop all servers (SAFE - kills by port, not by process pattern)
+mcp__task-manager__bash_docker({ command: "lsof -ti:3001 | xargs -r kill -9 2>/dev/null; exit 0" })  # Backend API
+mcp__task-manager__bash_docker({ command: "lsof -ti:5173 | xargs -r kill -9 2>/dev/null; exit 0" })  # Vite frontend
+mcp__task-manager__bash_docker({ command: "lsof -ti:3000 | xargs -r kill -9 2>/dev/null; exit 0" })  # Alternative frontend port
 mcp__task-manager__bash_docker({ command: "sleep 1" })
 
-# Verify stopped (THIS is the real check - not the pkill errors above)
+# Verify stopped
 mcp__task-manager__bash_docker({ command: "curl -s http://localhost:3001/health && echo '⚠️ Backend still running' || echo '✅ Backend stopped'" })
 mcp__task-manager__bash_docker({ command: "curl -s http://localhost:5173 > /dev/null 2>&1 && echo '⚠️ Frontend still running' || echo '✅ Frontend stopped'" })
 ```
@@ -341,8 +379,8 @@ mcp__task-manager__bash_docker({ command: "curl -s http://localhost:5173 > /dev/
 **Only restart if you modify backend code:**
 
 ```bash
-# Kill backend only
-mcp__task-manager__bash_docker({ command: "pkill -f 'node.*index.js' || true && sleep 1" })
+# Kill backend only (SAFE - by port)
+mcp__task-manager__bash_docker({ command: "lsof -ti:3001 | xargs -r kill -9 2>/dev/null; sleep 1; exit 0" })
 
 # Restart backend
 mcp__task-manager__bash_docker({ command: "(cd server && node index.js > ../server.log 2>&1 &)" })
@@ -395,11 +433,11 @@ mcp__task-manager__bash_docker({
 
 # Coding Agent Prompt (v6.3 - Context Management & No Summary Files)
 
-**v6.3 (Dec 15, 2024):** Explicit context management (stop at 45 messages) + ban summary file creation
-**v6.2 (Dec 14, 2024):** Docker-specific fixes - path rules, timing, port checking, snapshot lifecycle
-**v6.1 (Dec 14, 2024):** Screenshot buffer overflow fix - ban fullPage screenshots
-**v6.0 (Dec 13, 2024):** Multi-task mode for Docker, 40% token reduction, condensed guidance
-**v5.1 (Dec 12, 2024):** Git commit granularity, task batching guidance
+**v6.3 (Dec 15, 2025):** Explicit context management (stop at 45 messages) + ban summary file creation
+**v6.2 (Dec 14, 2025):** Docker-specific fixes - path rules, timing, port checking, snapshot lifecycle
+**v6.1 (Dec 14, 2025):** Screenshot buffer overflow fix - ban fullPage screenshots
+**v6.0 (Dec 13, 2025):** Multi-task mode for Docker, 40% token reduction, condensed guidance
+**v5.1 (Dec 12, 2025):** Git commit granularity, task batching guidance
 
 ---
 
@@ -551,7 +589,7 @@ For each task:
    - Handle errors gracefully
 
 3. **Restart servers if backend changed (see preamble for mode-specific commands):**
-   - Docker: Use `pkill -f 'node.*index.js'` then restart
+   - Docker: Use `lsof -ti:3001 | xargs -r kill -9` then restart (SAFE - kills by port, not pattern)
    - Local: Use `lsof -ti:3001 | xargs kill -9` (targeted, doesn't kill Web UI)
 
 4. **Verify with browser (MANDATORY - every task, no exceptions):**
@@ -609,33 +647,50 @@ For each task:
 
 **Rule:** Each task MUST have its OWN screenshot with task ID in filename.
 
+**MANDATORY Naming Convention:** `task_{TASK_ID}_{short_description}.png`
+
+❌ **WRONG - Bad naming:**
+```javascript
+browser_take_screenshot({ name: "migrations_complete.png" })  // ❌ No task ID
+browser_take_screenshot({ name: "frontend_loaded.png" })      // ❌ No task ID
+browser_take_screenshot({ name: "session_5_final.png" })      // ❌ No task ID
+browser_take_screenshot({ name: "verification.png" })         // ❌ No task ID
+```
+
 ❌ **WRONG - Grouping tasks:**
 ```javascript
 // Complete tasks 1547, 1548, 1549, 1550, 1551
-browser_take_screenshot({ name: "migrations_complete.png" })
+browser_take_screenshot({ name: "task_1547_to_1551.png" })
 // ❌ This verifies 5 tasks with 1 screenshot - NOT ALLOWED
 ```
 
-✅ **CORRECT - Individual verification:**
+✅ **CORRECT - Individual verification with proper naming:**
 ```javascript
 // Task 1547
 start_task({ task_id: 1547 })
 ... implement ...
-browser_take_screenshot({ filename: "task_1547_users_table.png" })
+browser_take_screenshot({ name: "task_1547_users_table.png" })
 update_task_status({ task_id: 1547, done: true })
 
 // Task 1548
 start_task({ task_id: 1548 })
 ... implement ...
-browser_take_screenshot({ filename: "task_1548_conversations_table.png" })
+browser_take_screenshot({ name: "task_1548_conversations_table.png" })
 update_task_status({ task_id: 1548, done: true })
 ```
+
+**Naming Guidelines:**
+- Format: `task_{TASK_ID}_{description}.png`
+- Task ID: The actual task ID from the database (e.g., 1547, 1548)
+- Description: Short, snake_case description (e.g., `users_table`, `login_form`, `api_response`)
+- Examples: `task_1547_users_table.png`, `task_15_homepage_loaded.png`, `task_203_error_handling.png`
 
 **Why this matters:**
 - Each screenshot documents what THAT specific task accomplished
 - Makes debugging easier (know exactly which task caused issue)
 - Prevents "I verified 5 tasks together" shortcuts
 - Better session quality correlation (r=0.98 with screenshot count)
+- **NEW:** Enables UI gallery view organized by task ID
 
 **Exception:** If multiple tasks are genuinely completed in ONE operation (e.g., running a single migration script that creates 5 tables in one go), you may take one screenshot BUT must explain in commit message: "Tasks 1547-1551 completed together via migrations/005_schema.js - single migration creates all 5 tables"
 
@@ -891,9 +946,9 @@ browser_click({ ref: "e52" })  // Use ref from snapshot2
 - Database may not have tests for all tasks
 
 **Port Already In Use:**
-- Use `pkill` commands from STEP 2
+- Use `lsof -ti:PORT | xargs -r kill -9` commands from STEP 2 (SAFE - port-specific)
 - Verify with curl health checks
-- Wait 1 second after pkill before restarting
+- Wait 1 second after kill before restarting
 
 ---
 

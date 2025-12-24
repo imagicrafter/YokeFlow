@@ -1,6 +1,6 @@
-# Next.js Web UI for Autonomous Coding Agent
+# YokeFlow Web UI
 
-Modern React/Next.js web interface for the autonomous coding agent platform.
+Modern React/Next.js web interface for the YokeFlow autonomous development platform.
 
 ## Features (Production Ready - v2.0)
 
@@ -19,7 +19,8 @@ Modern React/Next.js web interface for the autonomous coding agent platform.
 
 ✅ **Project Creation**
 - Real-time project name validation
-- Drag & drop spec file upload
+- Multi-file spec upload with drag & drop
+- File list display with remove buttons
 - Project name auto-fill from filename
 - Model selection (Opus/Sonnet)
 - Sandbox type selection (Docker/Local)
@@ -28,7 +29,7 @@ Modern React/Next.js web interface for the autonomous coding agent platform.
 
 ✅ **Project Detail**
 - Live WebSocket updates for real-time progress
-- Five interactive tabs (Overview, History, Quality, Logs, Settings)
+- Six interactive tabs (Overview, History, Quality, Logs, Screenshots, Settings)
 - Session timeline with status badges
 - Smart session controls (Initialize/Start Coding/Stop)
 - Project reset with confirmation dialog
@@ -37,6 +38,13 @@ Modern React/Next.js web interface for the autonomous coding agent platform.
 - Next task display
 - Task detail modal with epic/task/test hierarchy
 - Project details panel with environment editor
+
+✅ **Screenshots Tab**
+- Gallery view of session screenshots
+- Chronological organization
+- Lightbox viewer with zoom
+- Download screenshots
+- Session context display
 
 ✅ **History Tab**
 - Database-driven session metrics
@@ -74,6 +82,14 @@ Modern React/Next.js web interface for the autonomous coding agent platform.
 - Syntax validation
 - Save directly from UI
 
+✅ **Docker Container Management** (/containers page)
+- Centralized container management UI
+- Start/Stop/Delete controls
+- Real-time status display (running/stopped/exited)
+- Port mappings display
+- Statistics dashboard (total/running/stopped counts)
+- Auto-stop on project completion
+
 ✅ **UI/UX**
 - Dark theme throughout
 - Responsive design (mobile/tablet/desktop)
@@ -82,7 +98,7 @@ Modern React/Next.js web interface for the autonomous coding agent platform.
 - Breadcrumb navigation
 - WebSocket connection indicator
 - Real-time updates across all views
-- Toast notifications (no more alert boxes)
+- Toast notifications (sonner library)
 - Confirmation dialogs for destructive actions
 - Professional, modern interface
 

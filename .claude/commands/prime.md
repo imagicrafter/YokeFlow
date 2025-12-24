@@ -12,12 +12,8 @@ Read these files to understand the autonomous coding agent system:
 
 2. **README.md** - User guide
    - Installation and setup
-   - Usage examples (CLI and API/Web UI)
+   - Usage examples
    - Project structure
-
-3. **YOKEFLOW.md** - Transition guide
-   - We are transitioning to a new codebase and re-branding
-   - Part of this process is to improve the Prompt Improvement System
    
 ## After Reading
 
@@ -25,7 +21,7 @@ You should understand:
 
 ### Core System
 - ✅ **Purpose**: Autonomous coding agent using Claude to build complete applications
-- ✅ **Architecture**: API-first platform with CLI support
+- ✅ **Architecture**: API-first platform
   - FastAPI REST API with WebSocket (port 8000)
   - Next.js Web UI (TypeScript/React, port 3000)
   - PostgreSQL database with async operations

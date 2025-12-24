@@ -6,8 +6,8 @@ import { ClientLayout } from "@/components/ClientLayout";
 const inter = Inter({ subsets: ["latin"] });
 
 export const metadata: Metadata = {
-  title: "Autonomous Coding Agent",
-  description: "Autonomous coding agent platform for building applications with AI",
+  title: "YokeFlow",
+  description: "Autonomous AI development platform for building complete applications",
 };
 
 export default function RootLayout({

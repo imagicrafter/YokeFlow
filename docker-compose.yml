@@ -2,9 +2,9 @@
 services:
   postgres:
     image: postgres:16-alpine
-    container_name: autonomous_coding_postgres
+    container_name: yokeflow_postgres
     environment:
-      POSTGRES_DB: autonomous_coding
+      POSTGRES_DB: yokeflow
       POSTGRES_USER: agent
       POSTGRES_PASSWORD: agent_dev_password
       # PostgreSQL tuning for development
@@ -19,20 +19,20 @@ services:
       # Initialize database with schema on first run
       - ./schema/postgresql:/docker-entrypoint-initdb.d:ro
     healthcheck:
-      test: ["CMD-SHELL", "pg_isready -U agent -d autonomous_coding"]
+      test: ["CMD-SHELL", "pg_isready -U agent -d yokeflow"]
       interval: 10s
       timeout: 5s
       retries: 5
     restart: unless-stopped
     networks:
-      - autonomous_coding_network
+      - yokeflow_network
 
   # Optional: pgAdmin for database management UI
   pgadmin:
     image: dpage/pgadmin4:latest
-    container_name: autonomous_coding_pgadmin
+    container_name: yokeflow_pgadmin
     environment:
-      PGADMIN_DEFAULT_EMAIL: admin@autonomous-coding.local
+      PGADMIN_DEFAULT_EMAIL: admin@yokeflow.local
       PGADMIN_DEFAULT_PASSWORD: admin
       PGADMIN_CONFIG_SERVER_MODE: 'False'
       PGADMIN_CONFIG_MASTER_PASSWORD_REQUIRED: 'False'
@@ -43,15 +43,15 @@ services:
         condition: service_healthy
     restart: unless-stopped
     networks:
-      - autonomous_coding_network
+      - yokeflow_network
     profiles:
       - tools  # Only start if explicitly requested with --profile tools
 
 volumes:
   postgres_data:
-    name: autonomous_coding_postgres_data
+    name: yokeflow_postgres_data
 
 networks:
-  autonomous_coding_network:
-    name: autonomous_coding_network
+  yokeflow_network:
+    name: yokeflow_network
     driver: bridge

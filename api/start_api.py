@@ -16,7 +16,7 @@ sys.path.insert(0, str(Path(__file__).parent.parent))
 os.chdir(Path(__file__).parent.parent)
 
 # Check if PostgreSQL is configured
-from database_connection import is_postgresql_configured
+from core.database_connection import is_postgresql_configured
 
 if not is_postgresql_configured():
     print("\n" + "="*60)

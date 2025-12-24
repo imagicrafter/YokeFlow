@@ -1,8 +1,8 @@
 """
-Autonomous Coding Agent API
-============================
+YokeFlow API
+============
 
-REST API for managing autonomous coding projects and sessions.
+REST API for managing YokeFlow projects and sessions.
 """
 
 __version__ = "1.0.0"

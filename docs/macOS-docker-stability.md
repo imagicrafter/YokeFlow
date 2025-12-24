@@ -129,25 +129,6 @@ Then navigate to http://localhost:3000 and start your sessions.
 - Docker Desktop (a GUI app) gets throttled → VM suspends → PostgreSQL unreachable
 - Must disable BOTH to prevent Docker issues
 
-## Evidence from Session Logs
-
-### Session 41 (First Docker Crash)
-```
-All tasks #689-696 are now complete! Let me commit this work:
-[Tool: Bash]
-Failed to execute command in Docker: ('Connection aborted.', ConnectionRefusedError(61, 'Connection refused'))
-```
-
-**What happened:** Docker daemon stopped responding mid-session.
-
-### Recovery
-The agent tried to recover but couldn't commit work. However:
-- ✅ Session 42 started successfully (after Docker recovered)
-- ✅ Session 44 completed Epic #104 (8 tasks)
-- ✅ All work was eventually committed
-
-This shows the system is resilient, but the watchdog would prevent the interruption entirely.
-
 ## Why Not Just Use System Preferences?
 
 **System Preferences → Energy Saver:**
@@ -214,13 +195,13 @@ chmod +x scripts/docker-watchdog.sh
 **PostgreSQL not restarting:**
 ```bash
 # Manually restart container
-docker start autonomous_coding_postgres
+docker start yokeflow-postgres
 
 # Check container health
 docker ps -a | grep postgres
 
 # Check logs
-docker logs autonomous_coding_postgres
+docker logs yokeflow-postgres
 ```
 
 ## Summary

@@ -10,6 +10,7 @@ import { CurrentSession } from '@/components/CurrentSession';
 import { CompletionBanner } from '@/components/CompletionBanner';
 import { QualityDashboard } from '@/components/QualityDashboard';
 import { SessionLogsViewer } from '@/components/SessionLogsViewer';
+import { ScreenshotsGallery } from '@/components/ScreenshotsGallery';
 import { ResetProjectDialog } from '@/components/ResetProjectDialog';
 import { ProjectDetailsPanel } from '@/components/ProjectDetailsPanel';
 import ConfirmDialog from '@/components/ConfirmDialog';
@@ -31,7 +32,7 @@ export default function ProjectDetailPage() {
   const [isInitializing, setIsInitializing] = useState(false);
   const [isStartingCoding, setIsStartingCoding] = useState(false);
   const [isCancelling, setIsCancelling] = useState(false);
-  const [activeTab, setActiveTab] = useState<'current' | 'history' | 'quality' | 'logs'>('current');
+  const [activeTab, setActiveTab] = useState<'current' | 'history' | 'quality' | 'logs' | 'screenshots'>('current');
   const [isStopping, setIsStopping] = useState(false);
   const [isStoppingAfterCurrent, setIsStoppingAfterCurrent] = useState(false);
   const [isRefreshingSessions, setIsRefreshingSessions] = useState(false);
@@ -238,7 +239,7 @@ export default function ProjectDetailPage() {
     setIsRefreshingSessions(true);
     try {
       // Call the cleanup endpoint to mark orphaned sessions as interrupted
-      await api.post('/api/admin/cleanup-orphaned-sessions');
+      await api.cleanupOrphanedSessions();
       // Reload sessions to show updated status
       await loadSessions();
       toast.success('Session status refreshed', {
@@ -711,6 +712,17 @@ export default function ProjectDetailPage() {
               Logs
               <span className="ml-2 text-sm">📄</span>
             </button>
+            <button
+              onClick={() => setActiveTab('screenshots')}
+              className={`flex-1 px-6 py-4 font-medium transition-colors ${
+                activeTab === 'screenshots'
+                  ? 'bg-gray-800 text-blue-400 border-b-2 border-blue-500'
+                  : 'text-gray-400 hover:text-gray-300 hover:bg-gray-800/50'
+              }`}
+            >
+              Screenshots
+              <span className="ml-2 text-sm">📸</span>
+            </button>
           </div>
 
           {/* Tab Content */}
@@ -729,6 +741,8 @@ export default function ProjectDetailPage() {
                 toolCount={toolCount}
                 assistantMessages={assistantMessages}
                 isInitialized={is_initialized}
+                isInitializing={isInitializing}
+                isStartingCoding={isStartingCoding}
               />
             )}
 
@@ -746,6 +760,10 @@ export default function ProjectDetailPage() {
 
             {activeTab === 'logs' && (
               <SessionLogsViewer projectId={projectId} />
+            )}
+
+            {activeTab === 'screenshots' && (
+              <ScreenshotsGallery projectId={projectId} />
             )}
           </div>
         </div>

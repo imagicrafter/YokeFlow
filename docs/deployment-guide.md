@@ -1,7 +1,23 @@
 # Deployment Guide - Digital Ocean
 
-**Last Updated:** December 19, 2025
-**Status:** Production Ready ✅
+**Last Updated:** December 24, 2025
+**Status:** ⚠️ Experimental - Not Fully Tested
+
+> **⚠️ IMPORTANT NOTICE:**
+>
+> This deployment guide is **experimental** and has not been thoroughly tested with the current version of YokeFlow. An earlier version was successfully deployed to Digital Ocean, but this guide needs comprehensive testing and validation with the latest codebase.
+>
+> **Current Status:**
+> - ✅ Basic deployment steps verified with earlier version
+> - ⚠️ Needs testing with current YokeFlow branding and features
+> - ⚠️ May require adjustments for Docker container management features
+> - ⚠️ Some configurations may be outdated
+>
+> **This guide will be updated and fully tested in a future release.**
+>
+> If you attempt deployment using this guide, please report any issues or required changes via GitHub Issues.
+
+---
 
 **Recent Updates (December 2025):**
 - ✅ JWT Authentication implemented (backend + frontend)
@@ -10,12 +26,15 @@
 - ✅ Prompt file logging (tracks which prompt variant was used)
 - ✅ WebSocket real-time progress updates
 - ✅ Reset project git repository handling improved
+- ✅ Docker container management (auto-stop on completion)
+- ✅ Multi-file spec uploads
+- ✅ YokeFlow rebranding complete
 
 ---
 
 ## Overview
 
-This guide covers deploying the Autonomous Coding Agent Platform to Digital Ocean with:
+This guide covers deploying YokeFlow to Digital Ocean with:
 - Docker sandboxing for agent sessions
 - PostgreSQL database (self-hosted or managed)
 - FastAPI REST API + Next.js Web UI
@@ -63,7 +82,7 @@ This guide covers deploying the Autonomous Coding Agent Platform to Digital Ocea
 │                                                      │
 │  Volumes:                                            │
 │    ├─→ postgres_data (database persistence)         │
-│    └─→ /var/autonomous-coding/generations           │
+│    └─→ /var/yokeflow/generations                    │
 │                                                      │
 └─────────────────────────────────────────────────────┘
           │
@@ -175,14 +194,14 @@ The deployment server (Digital Ocean Droplet) requires:
 
 ```bash
 # Create Droplet with Docker pre-installed
-doctl compute droplet create autonomous-coding \
+doctl compute droplet create yokeflow \
   --image docker-20-04 \
   --size s-4vcpu-8gb \
   --region nyc1 \
   --ssh-keys $(doctl compute ssh-key list --format ID --no-header)
 
 # Get Droplet IP
-doctl compute droplet get autonomous-coding --format PublicIPv4 --no-header
+doctl compute droplet get yokeflow --format PublicIPv4 --no-header
 ```
 
 **Droplet Specifications:**
@@ -224,8 +243,8 @@ apt install -y git curl wget vim htop postgresql-client
 cd /var
 
 # Clone repository
-git clone https://github.com/yourusername/autonomous-coding.git
-cd autonomous-coding
+git clone https://github.com/yourusername/yokeflow.git
+cd yokeflow
 ```
 
 ### Phase 3: Configure Environment
@@ -243,7 +262,7 @@ vim .env
 ```bash
 # PostgreSQL Connection
 # IMPORTANT: Use 'postgres' (service name) not 'localhost' when using Docker Compose
-DATABASE_URL=postgresql://agent:CHANGE_THIS_PASSWORD@postgres:5432/autonomous_coding
+DATABASE_URL=postgresql://agent:CHANGE_THIS_PASSWORD@postgres:5432/yokeflow
 POSTGRES_PASSWORD=CHANGE_THIS_PASSWORD
 
 # Claude API
@@ -307,7 +326,7 @@ docker compose logs -f
 **Expected output:**
 ```
 NAME                              STATUS
-autonomous_coding_postgres        Up 30 seconds (healthy)
+yokeflow_postgres        Up 30 seconds (healthy)
 ```
 
 ### Phase 5: Initialize Database
@@ -315,12 +334,12 @@ autonomous_coding_postgres        Up 30 seconds (healthy)
 ```bash
 # Database schema is automatically initialized via docker-compose.yml
 # Verify database is ready
-docker exec autonomous_coding_postgres \
-  psql -U agent -d autonomous_coding -c "SELECT version();"
+docker exec yokeflow_postgres \
+  psql -U agent -d yokeflow -c "SELECT version();"
 
 # Check tables were created
-docker exec autonomous_coding_postgres \
-  psql -U agent -d autonomous_coding -c "\dt"
+docker exec yokeflow_postgres \
+  psql -U agent -d yokeflow -c "\dt"
 
 # If container name is different, check with:
 docker compose ps
@@ -480,7 +499,7 @@ services:
     build:
       context: .
       dockerfile: Dockerfile.api
-    container_name: autonomous_coding_api
+    container_name: yokeflow_api
     environment:
       - DATABASE_URL=${DATABASE_URL}
       - CLAUDE_CODE_OAUTH_TOKEN=${CLAUDE_CODE_OAUTH_TOKEN}
@@ -495,7 +514,7 @@ services:
       - postgres
     restart: unless-stopped
     networks:
-      - autonomous_coding_network
+      - yokeflow_network
 
   web:
     build:
@@ -505,7 +524,7 @@ services:
         # Pass build arguments to Dockerfile (required for Next.js build)
         - NEXT_PUBLIC_API_URL=${NEXT_PUBLIC_API_URL}
         - NEXT_PUBLIC_WS_URL=${NEXT_PUBLIC_WS_URL}
-    container_name: autonomous_coding_web
+    container_name: yokeflow_web
     environment:
       - NEXT_PUBLIC_API_URL=${NEXT_PUBLIC_API_URL}
       - NEXT_PUBLIC_WS_URL=${NEXT_PUBLIC_WS_URL}
@@ -513,13 +532,13 @@ services:
       - "3000:3000"
     restart: unless-stopped
     networks:
-      - autonomous_coding_network
+      - yokeflow_network
 
   postgres:
     image: postgres:16-alpine
-    container_name: autonomous_coding_postgres
+    container_name: yokeflow_postgres
     environment:
-      POSTGRES_DB: autonomous_coding
+      POSTGRES_DB: yokeflow
       POSTGRES_USER: agent
       POSTGRES_PASSWORD: ${POSTGRES_PASSWORD}
     ports:
@@ -528,21 +547,21 @@ services:
       - postgres_data:/var/lib/postgresql/data
       - ./schema/postgresql:/docker-entrypoint-initdb.d:ro
     healthcheck:
-      test: ["CMD-SHELL", "pg_isready -U agent -d autonomous_coding"]
+      test: ["CMD-SHELL", "pg_isready -U agent -d yokeflow"]
       interval: 10s
       timeout: 5s
       retries: 5
     restart: unless-stopped
     networks:
-      - autonomous_coding_network
+      - yokeflow_network
 
 volumes:
   postgres_data:
-    name: autonomous_coding_postgres_data
+    name: yokeflow_postgres_data
 
 networks:
-  autonomous_coding_network:
-    name: autonomous_coding_network
+  yokeflow_network:
+    name: yokeflow_network
     driver: bridge
 EOF
 ```
@@ -666,7 +685,7 @@ Build the agent sandbox image (with Playwright):
 ```bash
 # Build custom agent sandbox image with Playwright pre-installed
 # This image is used by agent sessions for browser testing
-docker build -f Dockerfile.agent-sandbox -t autonomous-agent-sandbox:latest .
+docker build -f Dockerfile.agent-sandbox -t yokeflow-sandbox:latest .
 
 # This build takes 3-5 minutes and ~2GB disk space
 # But it only needs to be done once (or when updating)
@@ -831,9 +850,9 @@ Each agent session runs in an isolated Docker container:
 Host Machine (Droplet)
 ├── Docker Engine
 │   ├── Agent Session Container 1 (Project A)
-│   │   └── /workspace → mounted from /var/autonomous-coding/generations/project-a
+│   │   └── /workspace → mounted from /var/yokeflow/generations/project-a
 │   ├── Agent Session Container 2 (Project B)
-│   │   └── /workspace → mounted from /var/autonomous-coding/generations/project-b
+│   │   └── /workspace → mounted from /var/yokeflow/generations/project-b
 │   └── ...
 ```
 
@@ -1219,7 +1238,7 @@ The platform includes complete JWT authentication with the following features:
 - Frontend detects this by testing `/api/info` endpoint accessibility
 - Useful for local development - no login required
 - **Production:** Always set `UI_PASSWORD` to enable authentication
-- See [docs/development-mode.md](development-mode.md) for details
+- See [docs/authentication.md](authentication.md) for details
 
 **Dependencies** (already installed):
 ```bash
@@ -1340,10 +1359,10 @@ cat > /usr/local/bin/backup-postgres.sh <<'EOF'
 set -e
 
 # Configuration
-BACKUP_DIR="/var/backups/autonomous-coding"
+BACKUP_DIR="/var/backups/yokeflow"
 TIMESTAMP=$(date +%Y%m%d_%H%M%S)
-POSTGRES_CONTAINER="autonomous_coding_postgres"
-DATABASE="autonomous_coding"
+POSTGRES_CONTAINER="yokeflow_postgres"
+DATABASE="yokeflow"
 USER="agent"
 
 # Retention (keep backups for 30 days)
@@ -1393,14 +1412,14 @@ crontab -e
 
 ```bash
 # List available backups
-ls -lh /var/backups/autonomous-coding/
+ls -lh /var/backups/yokeflow/
 
 # Restore from backup
-gunzip /var/backups/autonomous-coding/postgres_20250118_020000.dump.gz
+gunzip /var/backups/yokeflow/postgres_20250118_020000.dump.gz
 
-docker exec -i autonomous_coding_postgres \
-  pg_restore -U agent -d autonomous_coding --clean \
-  < /var/backups/autonomous-coding/postgres_20250118_020000.dump
+docker exec -i yokeflow_postgres \
+  pg_restore -U agent -d yokeflow --clean \
+  < /var/backups/yokeflow/postgres_20250118_020000.dump
 ```
 
 ### Monitoring
@@ -1696,8 +1715,8 @@ Run "npx playwright install chrome"
 
 ```bash
 # 1. Build custom agent sandbox image (one-time, 3-5 minutes)
-cd /var/autonomous-coding
-docker build -f Dockerfile.agent-sandbox -t autonomous-agent-sandbox:latest .
+cd /var/yokeflow
+docker build -f Dockerfile.agent-sandbox -t yokeflow-sandbox:latest .
 
 # This installs:
 # - Playwright browsers (Chrome, Chromium)
@@ -1705,10 +1724,10 @@ docker build -f Dockerfile.agent-sandbox -t autonomous-agent-sandbox:latest .
 # - Git, build tools
 
 # 2. Verify image built
-docker images | grep autonomous-agent-sandbox
+docker images | grep yokeflow-sandbox
 
 # 3. Next agent session will use new image automatically
-# (config.py defaults to autonomous-agent-sandbox:latest)
+# (config.py defaults to yokeflow-sandbox:latest)
 ```
 
 **Prevention:** Always build agent sandbox image during initial deployment (Phase 7, before starting services)
@@ -1721,7 +1740,7 @@ docker images | grep autonomous-agent-sandbox
 **Verify Playwright works:**
 ```bash
 # After starting a coding session
-docker exec autonomous-agent-<project-name> npx playwright --version
+docker exec yokeflow-<project-name> npx playwright --version
 ```
 
 ---
@@ -1898,10 +1917,10 @@ docker compose logs api
 vim .env
 
 # Change this:
-DATABASE_URL=postgresql://agent:password@localhost:5432/autonomous_coding
+DATABASE_URL=postgresql://agent:password@localhost:5432/yokeflow
 
 # To this (use service name 'postgres'):
-DATABASE_URL=postgresql://agent:password@postgres:5432/autonomous_coding
+DATABASE_URL=postgresql://agent:password@postgres:5432/yokeflow
 
 # Restart API container
 docker compose -f docker-compose.prod.yml restart api

@@ -1,10 +1,16 @@
-# Autonomous Coding Agent API
+# YokeFlow API - Developer Documentation
 
-RESTful API for managing autonomous coding agent projects and sessions with real-time WebSocket updates.
+RESTful API for managing YokeFlow projects and sessions with real-time WebSocket updates.
+
+**For API usage examples and quick start, see [docs/api-usage.md](../docs/api-usage.md)**
+
+---
 
 ## Overview
 
-The API provides a complete backend for the Autonomous Coding Agent Platform, including:
+This document is for **developers** working on the API itself. For **users** wanting to call the API, see the [API Usage Guide](../docs/api-usage.md).
+
+The API provides a complete backend for the YokeFlow platform, including:
 - **JWT Authentication** - Secure token-based authentication with development mode
 - **Project Management** - Create, list, and monitor projects with validation
 - **Session Control** - Separate endpoints for initialization and coding
@@ -50,7 +56,7 @@ Health check endpoint.
 ```json
 {
   "status": "healthy",
-  "timestamp": "2024-12-10T12:00:00",
+  "timestamp": "2025-12-10T12:00:00",
   "version": "1.0.0"
 }
 ```
@@ -216,7 +222,7 @@ Run initialization session (Session 0) only. Creates project roadmap (epics, tas
   "session_type": "initializer",
   "model": "claude-opus-4-5-20251101",
   "status": "running",
-  "created_at": "2024-12-16T12:00:00Z"
+  "created_at": "2025-12-16T12:00:00Z"
 }
 ```
 
@@ -323,15 +329,15 @@ List all sessions for a project.
     "session_number": 1,
     "session_type": "initializer",
     "status": "completed",
-    "created_at": "2024-12-16T12:00:00Z",
-    "completed_at": "2024-12-16T12:15:00Z"
+    "created_at": "2025-12-16T12:00:00Z",
+    "completed_at": "2025-12-16T12:15:00Z"
   },
   {
     "session_id": "b2c3d4e5-...",
     "session_number": 2,
     "session_type": "coding",
     "status": "running",
-    "created_at": "2024-12-16T12:20:00Z"
+    "created_at": "2025-12-16T12:20:00Z"
   }
 ]
 ```
@@ -350,8 +356,8 @@ Get details for a specific session.
   "status": "completed",
   "model": "claude-opus-4-5-20251101",
   "sandbox_type": "docker",
-  "created_at": "2024-12-16T12:00:00Z",
-  "completed_at": "2024-12-16T12:15:00Z",
+  "created_at": "2025-12-16T12:00:00Z",
+  "completed_at": "2025-12-16T12:15:00Z",
   "metadata": {
     "tool_use_count": 42,
     "tasks_completed": 0,
@@ -396,7 +402,7 @@ const ws = new WebSocket('ws://localhost:8000/api/ws/550e8400-...');
 {
   "type": "assistant_message",
   "content": "I'm implementing the authentication module...",
-  "timestamp": "2024-12-16T12:30:45Z"
+  "timestamp": "2025-12-16T12:30:45Z"
 }
 ```
 
@@ -459,7 +465,7 @@ function ProjectDetail({ projectId }) {
 ┌─────────────────────────────────────────┐
 │   Client Layer                          │
 │   - Next.js Web UI (port 3000)         │
-│   - CLI (autonomous_agent.py)          │
+│   - Third-party API clients           │
 │   - Third-party integrations           │
 └─────────────────┬───────────────────────┘
                   │ HTTP / WebSocket
@@ -698,26 +704,26 @@ echo $DATABASE_URL
 
 ## Version History
 
-**v2.1.0** (December 2024)
+**v2.1.0** (December 2025)
 - ✅ JWT authentication with development mode
 - ✅ Project name validation (lowercase, alphanumeric, hyphens, underscores)
 - ✅ Protected endpoints with token-based auth
 - ✅ Session logs API enhancements (JSONL raw content)
 - ✅ Enhanced error handling and validation
 
-**v2.0.0** (December 2024)
+**v2.0.0** (December 2025)
 - ✅ Phase 2: Frontend integration complete
 - ✅ Real-time WebSocket events (tool_use, assistant_message)
 - ✅ Smart session controls (init vs coding)
 - ✅ Three-tab session interface
 
-**v1.5.0** (December 2024)
+**v1.5.0** (December 2025)
 - ✅ Phase 1: Backend refactor complete
 - ✅ Separate endpoints (/initialize, /coding/start)
 - ✅ Type-aware stale session thresholds
 - ✅ Enhanced WebSocket event types
 
-**v1.0.0** (December 2024)
+**v1.0.0** (December 2025)
 - ✅ PostgreSQL migration complete
 - ✅ Async database operations
 - ✅ WebSocket support

@@ -1,4 +1,10 @@
-# Autonomous Coding Agent - API-First Platform
+# YokeFlow - Autonomous AI Development Platform
+
+[![License](https://img.shields.io/badge/License-YCL%20v1.0-blue.svg)](LICENSE)
+[![Python](https://img.shields.io/badge/Python-3.9%2B-blue.svg)](https://www.python.org/)
+[![Node](https://img.shields.io/badge/Node-20%2B-green.svg)](https://nodejs.org/)
+[![PostgreSQL](https://img.shields.io/badge/PostgreSQL-16-blue.svg)](https://www.postgresql.org/)
+[![PRs Welcome](https://img.shields.io/badge/PRs-welcome-brightgreen.svg)](CONTRIBUTING.md)
 
 Build complete applications using Claude across multiple autonomous sessions. Production-ready API-first architecture with modern Next.js web UI, database abstraction, and agent orchestration.
 
@@ -19,13 +25,13 @@ Build complete applications using Claude across multiple autonomous sessions. Pr
 - ⚙️ YAML configuration file support
 - 🛑 Graceful shutdown handling (Ctrl+C properly finalizes sessions)
 
-**Forked from Anthropic's demo** with significant enhancements including API-first architecture, database abstraction, agent orchestration, and experimental review system for prompt engineering.
+**Originally forked from Anthropic's autonomous coding demo**, now evolved into YokeFlow with significant enhancements including API-first architecture, PostgreSQL database, agent orchestration, quality review system, and production-ready web interface.
 
-**Current Status (December 2025):**
+**Current Status: v1.0.0 - Production Ready (December 2025)**
 - ✅ **PostgreSQL Migration**: 100% complete, production-ready async architecture
 - ✅ **Docker Sandbox**: Full integration with 90+ sessions validated
 - ✅ **API Foundation**: REST endpoints, WebSocket support, orchestrator, JWT authentication
-- ✅ **Web UI (v2.0 - Production Ready)**: **Complete and polished** - ready for production deployment
+- ✅ **Web UI v2.0**: **Production ready** - Complete and polished interface
   - ✅ Project creation with validation, initialization, and coding session control
   - ✅ Real-time session monitoring with WebSocket updates
   - ✅ Session logs viewer (Human/Events/Errors tabs) with download
@@ -36,13 +42,12 @@ Build complete applications using Claude across multiple autonomous sessions. Pr
   - ✅ Toast notifications and confirmation dialogs (no more alert boxes)
   - ✅ Enhanced metrics (token breakdown, quality trends)
 - ✅ **CLI Tools**: Fully functional for all operations
-- ✅ **Review System** (4 Phases Complete):
+- ✅ **Review System** (3 Phases Production Ready):
   - ✅ **Phase 1**: Quick quality checks (zero-cost, every session)
   - ✅ **Phase 2**: Automated deep reviews (every 5 sessions or quality < 7)
   - ✅ **Phase 3**: Quality dashboard with collapsible reviews and download
-  - ✅ **Phase 4**: Prompt improvement analysis system
-- ✅ **Prompt Engineering**: Session review system validates and improves coding prompts
-- 🎯 **Next Steps**: Deploy to Digital Ocean, monitor production sessions, iterate on prompts
+  - ⏳ **Phase 4**: Prompt improvement analysis - Archived for post-release refactoring
+- 🎯 **Next Steps**: Complete pre-release testing, finalize documentation, make repository public
 
 **Note:** This platform is production-ready. The Web UI provides full functionality for project management, monitoring, and quality analysis. Authentication, validation, and comprehensive testing ensure deployment readiness.
 
@@ -112,7 +117,7 @@ npm run dev
 **Authentication:**
 - **Development Mode** (default): No password required, auto-bypasses login
 - **Production Mode**: Set `UI_PASSWORD` in `.env` file to enable JWT authentication
-- See [docs/development-mode.md](docs/development-mode.md) for details
+- See [docs/authentication.md](docs/authentication.md) for details
 
 **Features:**
 - ✅ Create projects by uploading spec files with real-time validation
@@ -123,6 +128,7 @@ npm run dev
 - ✅ Progress counters (epics/tasks/tests) with drill-down
 - ✅ Task detail views with epic/task/test hierarchy
 - ✅ Quality dashboard with collapsible deep reviews and markdown downloads
+- ✅ **Screenshots gallery** - View all browser verification screenshots organized by task ID
 - ✅ Project completion celebration banner
 - ✅ JWT authentication (development mode enabled by default)
 - ✅ Environment variable editor (inline .env editing)
@@ -203,49 +209,29 @@ See [docs/PREVENTING_MAC_SLEEP.md](docs/PREVENTING_MAC_SLEEP.md) for complete gu
 4. Stop after initialization for human review
 5. Resume coding sessions with "Start Session" button
 
-### Option 2: CLI (For Testing & Scripting)
+### Utility Scripts
 
-**Run the agent directly from command line:**
+Several utility scripts are available for development and debugging:
+
 ```bash
-# Start a new project (uses Opus for initialization, Sonnet for coding)
-python cli/autonomous_agent.py --project-dir ./my_project
+# View project progress (quick command-line check)
+python scripts/task_status.py generations/my_project
 
-# Use custom specification file or folder
-python cli/autonomous_agent.py --project-dir ./my_project --spec ./my-spec.md
-python cli/autonomous_agent.py --project-dir ./my_project --spec ./project-docs/
+# Reset stuck sessions (automatic cleanup also runs on session start)
+python scripts/cleanup_sessions.py [--project my_project] [--force]
 
-# Override default models
-python cli/autonomous_agent.py --project-dir ./my_project --model claude-opus-4-5-20251101
-python cli/autonomous_agent.py --project-dir ./my_project --coding-model claude-sonnet-4-5-20250929
+# Reset project to post-initialization state (for prompt iteration)
+python scripts/reset_project.py --project my_project [--yes]
 
-# Limit iterations for testing
-python cli/autonomous_agent.py --project-dir ./my_project --max-iterations 3
-
-# Verbose mode (show all tool calls)
-python cli/autonomous_agent.py --project-dir ./my_project --verbose
+# Clean up Docker containers
+python scripts/cleanup_containers.py
 ```
 
-**CLI Tools for Monitoring:**
-```bash
-# View task status
-python cli/task_status.py generations/my_project
-
-# Analyze test coverage after initialization
-python cli/analyze_test_coverage.py
-
-# Analyze session quality (manual research tool)
-python cli/review_agent.py --project generations/my_project --session 5 --quick
-
-# Reset to post-initialization state (saves 10-20 min vs re-init)
-python cli/reset_project.py --project-dir my_project --dry-run  # Preview
-python cli/reset_project.py --project-dir my_project --yes      # Execute
-```
-
-**When to use CLI:**
-- 🔧 Testing prompt improvements
-- 📊 Automated benchmarking and analysis
-- 🤖 Scripting and CI/CD integration
-- 🔬 Advanced debugging and inspection
+**Notes:**
+- All project management is done via the Web UI (port 3000)
+- Projects are stored in `generations/` directory
+- Models are selected in the Web UI when creating/initializing projects
+- Use Web UI for all normal operations (create, initialize, run sessions)
 
 ---
 
@@ -286,6 +272,51 @@ Press `Ctrl+C` to pause. Run the same command to resume.
 - Accurate progress tracking
 - MCP protocol-based (not shell scripts)
 
+### Multiple Specification Files
+
+For complex projects, you can upload multiple specification files:
+
+**Best practices:**
+1. **Name your main file** `main.md` or `spec.md`
+2. **Reference other files** in your main spec:
+   ```markdown
+   ## API Design
+   See `api-design.md` for detailed endpoint specifications.
+
+   ## Database Schema
+   See `database-schema.sql` for the complete schema.
+
+   ## Code Examples
+   See `example-auth.py` for authentication implementation patterns.
+   ```
+
+3. **Include supporting files**: API docs, schemas, code examples, wireframes, etc.
+
+**Supported file types:**
+- **Spec files**: `.txt`, `.md` (primary specification files)
+- **Code examples**: `.py`, `.ts`, `.js`, `.tsx`, `.jsx` (reference implementations)
+- **Config files**: `.json`, `.yaml`, `.yml`, `.sql`, `.sh` (schemas, scripts)
+- **Styling**: `.css`, `.html` (design references)
+
+**Example structure:**
+```
+main.md              # Main specification (read first)
+api-design.md        # API endpoint definitions
+database-schema.sql  # Database design
+example-auth.py      # Authentication code example
+example-api.ts       # API endpoint example
+config-example.json  # Configuration template
+wireframes.md        # UI mockups description
+```
+
+**How it works:**
+- Files are saved to a `spec/` directory in your project
+- The agent auto-detects the primary file (main.md, spec.md, or largest file)
+- The agent reads the primary file first, then lazy-loads other files as needed
+- This saves tokens and improves performance for large specifications
+
+**See** [docs/example-specs.md](docs/example-specs.md) for detailed examples and `example-specs/multi-file-spec/` for a complete working example.
+
 ### Security Model
 
 Designed for containerized deployment with blocklist approach:
@@ -300,7 +331,7 @@ Philosophy: Enable autonomous operation while maintaining safety.
 
 ### Configuration File (Recommended)
 
-Create `.autonomous-coding.yaml` in your project directory or `~/.autonomous-coding.yaml` for global defaults:
+Create `.yokeflow.yaml` in your project directory or `~/.yokeflow.yaml` for global defaults:
 
 ```yaml
 models:
@@ -317,7 +348,7 @@ project:
   max_iterations: null  # unlimited
 ```
 
-See [docs/configuration.md](docs/configuration.md) for complete guide and `.autonomous-coding.yaml.example` for all options.
+See [docs/configuration.md](docs/configuration.md) for complete guide and `.yokeflow.yaml.example` for all options.
 
 ### Environment Variables
 
@@ -328,9 +359,9 @@ The system uses a `.env` file for sensitive configuration. Copy `.env.example` t
 CLAUDE_CODE_OAUTH_TOKEN=your_actual_token_here
 
 # Required: PostgreSQL Database URL
-DATABASE_URL=postgresql://agent:agent_dev_password@localhost:5432/autonomous_coding
+DATABASE_URL=postgresql://agent:agent_dev_password@localhost:5432/yokeflow
 
-# Optional: Default models (can also set in .autonomous-coding.yaml)
+# Optional: Default models (can also set in .yokeflow.yaml)
 DEFAULT_INITIALIZER_MODEL=claude-opus-4-5-20251101
 DEFAULT_CODING_MODEL=claude-sonnet-4-5-20250929
 
@@ -345,40 +376,31 @@ CORS_ORIGINS=http://localhost:3000,http://localhost:5173
 - Never commit `.env` to git (it's in `.gitignore`)
 - Use `.env.example` as a template for required variables
 
-### Command-Line Options
+### Model Selection
 
-```bash
-# Use defaults (or config file settings)
-python autonomous_agent.py --project-dir ./my_project
+**For Web UI:** Select models when creating/initializing projects via the UI
 
-# Use custom config file
-python autonomous_agent.py --config my-config.yaml --project-dir ./my_project
-
-# Override models (CLI args override config file)
-python autonomous_agent.py --project-dir ./my_project --model claude-opus-4-5-20251101
-
-# Override just coding model
-python autonomous_agent.py --project-dir ./my_project --coding-model claude-opus-4-5-20251101
-
-# Limit iterations for testing
-python autonomous_agent.py --project-dir ./my_project --max-iterations 3
-
-# Verbose mode (show all tool details)
-python autonomous_agent.py --project-dir ./my_project --verbose
+**For CLI:** Configure models in `.yokeflow.yaml`:
+```yaml
+models:
+  initializer: claude-opus-4-5-20251101   # For Session 0 (planning)
+  coding: claude-sonnet-4-5-20250929      # For Sessions 1+ (coding)
 ```
 
-**Priority:** CLI arguments > Config file > Built-in defaults
+Models can also be set via environment variables in `.env`:
+```bash
+DEFAULT_INITIALIZER_MODEL=claude-opus-4-5-20251101
+DEFAULT_CODING_MODEL=claude-sonnet-4-5-20250929
+```
 
-**Output Modes:**
-- **Quiet (default)**: Clean terminal, full details in logs
-- **Verbose**: Shows all tool calls and results
+**Priority:** Web UI selection > `.yokeflow.yaml` > `.env` > Built-in defaults
 
 ---
 
 ## Project Structure
 
 ```
-autonomous-coding/
+yokeflow/
 ├── api/                      # FastAPI REST API
 │   ├── main.py              # API server with WebSocket
 │   ├── start_api.py         # API server launcher
@@ -389,26 +411,39 @@ autonomous-coding/
 │   │   ├── components/     # React components
 │   │   └── lib/            # API client, types, utils
 │   └── package.json         # Dependencies
-├── cli/                     # Command-line interface tools
-│   ├── autonomous_agent.py  # CLI entry point for running sessions
+├── core/                    # Core platform modules
+│   ├── orchestrator.py      # Session lifecycle management
+│   ├── agent.py             # Agent loop and session logic
+│   ├── database.py          # PostgreSQL abstraction (async)
+│   ├── database_connection.py  # Connection pooling
+│   ├── client.py            # Claude SDK client setup
+│   ├── config.py            # Configuration management
+│   ├── observability.py     # Session logging (JSONL + TXT)
+│   ├── security.py          # Blocklist validation
+│   ├── progress.py          # Progress tracking
+│   ├── prompts.py           # Prompt loading
+│   ├── reset.py             # Project reset logic
+│   ├── sandbox_manager.py   # Docker sandbox management
+│   └── sandbox_hooks.py     # Sandbox hooks
+├── review/                  # Review system modules
+│   ├── review_client.py     # Automated deep reviews (Phase 2)
+│   ├── review_metrics.py    # Quality metrics (Phase 1)
+│   └── review_agent.py      # Manual review tool
+├── scripts/                 # Utility tools (debugging/development)
 │   ├── task_status.py       # View task status and progress
-│   ├── review_agent.py      # Manual session quality analysis
 │   ├── reset_project.py     # Reset project to post-init state
-│   └── analyze_test_coverage.py  # Test coverage analysis
-├── orchestrator.py          # Agent orchestrator service
-├── agent.py                 # Agent session logic
-├── database.py              # PostgreSQL database abstraction layer
-├── database_connection.py   # Connection pooling and lifecycle
-├── client.py                # Claude SDK configuration
-├── security.py              # Blocklist security
-├── observability.py         # Session logging
-├── config.py                # Configuration management
-├── reset.py                 # Reset module (used by API)
-├── review_client.py         # Automated review system (Phase 2)
-├── review_metrics.py        # Quality metrics calculation (Phase 1)
-├── prompts/
-│   ├── initializer_prompt.md  # Session 1 instructions (Opus)
-│   ├── coding_prompt.md       # Sessions 2+ instructions (Sonnet)
+│   ├── analyze_sessions.py  # Analyze session metrics
+│   ├── cleanup_sessions.py  # Clean up stuck sessions
+│   ├── cleanup_containers.py  # Clean up Docker containers
+│   ├── init_database.py     # Initialize PostgreSQL schema
+│   ├── check_deep_reviews.py  # Inspect review data
+│   ├── show_review_recommendations.py  # Show review suggestions
+│   ├── docker-watchdog.sh   # Auto-restart Docker daemon
+│   ├── setup-macos-for-long-runs.sh  # Prevent sleep on macOS
+│   └── README.md            # Scripts documentation
+├── prompts/                 # Agent instructions
+│   ├── initializer_prompt.md  # Session 0 instructions (Opus)
+│   ├── coding_prompt.md       # Sessions 1+ instructions (Sonnet)
 │   └── review_prompt.md       # Deep review instructions
 ├── schema/
 │   └── postgresql/          # PostgreSQL database schema
@@ -418,11 +453,12 @@ autonomous-coding/
 │   ├── src/index.ts        # Server implementation
 │   └── dist/               # Compiled JavaScript
 ├── tests/                   # Test scripts
-└── docs/                    # Documentation
-    ├── developer-guide.md   # Technical deep-dive
-    ├── mcp-usage.md         # MCP integration details
-    ├── configuration.md     # Config file guide
-    └── review-system.md     # Complete review system documentation
+├── docs/                    # Documentation
+│   ├── developer-guide.md   # Technical deep-dive
+│   ├── mcp-usage.md         # MCP integration details
+│   ├── configuration.md     # Config file guide
+│   └── review-system.md     # Complete review system documentation
+└── generations/             # Generated projects (created at runtime)
 ```
 
 ### Generated Project Structure
@@ -513,12 +549,14 @@ Edit files in `prompts/` directory.
 - **This README** - Quick start and basic usage
 - [CLAUDE.md](CLAUDE.md) - Comprehensive quick reference guide
 - [docs/configuration.md](docs/configuration.md) - Config file documentation
+- [docs/example-specs.md](docs/example-specs.md) - Example specification files and best practices
 
 ### For Developers
 - [docs/developer-guide.md](docs/developer-guide.md) - Technical deep-dive
 - [docs/mcp-usage.md](docs/mcp-usage.md) - MCP integration
 - [docs/review-system.md](docs/review-system.md) - Complete review system documentation (4 phases)
-- [TODO.md](TODO.md) - Development roadmap and future enhancements
+- [YOKEFLOW.md](YOKEFLOW.md) - Transition checklist and release roadmap
+- [TODO-FUTURE.md](TODO-FUTURE.md) - Post-release enhancements
 
 ---
 
@@ -548,7 +586,7 @@ Edit files in `prompts/` directory.
 
 ## License
 
-MIT License
+YokeFlow Community License (YCL) v1.0 - See [LICENSE](LICENSE) for details.
 
 ---
 

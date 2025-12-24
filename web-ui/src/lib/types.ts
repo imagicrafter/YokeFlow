@@ -1,5 +1,5 @@
 /**
- * TypeScript types for the Autonomous Coding Agent API
+ * TypeScript types for the YokeFlow API
  * These match the Pydantic models in the FastAPI backend
  */
 
@@ -72,6 +72,7 @@ export interface Project {
   created_at: string;
   updated_at: string;
   status: string;
+  sandbox_type?: string;  // Sandbox type: 'docker', 'local', etc.
   is_initialized: boolean;  // NEW: Whether initialization (Session 1) is complete
   completed_at: string | null;  // Timestamp when all tasks completed
   progress: Progress;
@@ -491,4 +492,35 @@ export interface ImprovementMetrics {
   rejected_proposals: number;
   avg_quality_improvement: number | null;
   last_analysis_at: string | null;
+}
+
+/**
+ * Screenshot metadata
+ */
+export interface Screenshot {
+  filename: string;
+  size: number;
+  modified_at: string;
+  task_id: number | null;
+  url: string;
+}
+
+/**
+ * Docker container status
+ */
+export interface ContainerStatus {
+  container_exists: boolean;
+  status?: string; // 'running', 'exited', 'paused', etc.
+  container_id?: string;
+  container_name?: string;
+  ports?: Record<string, any>;
+  sandbox_type: string;
+  message?: string;
+}
+
+export interface ContainerActionResponse {
+  message: string;
+  started?: boolean;
+  stopped?: boolean;
+  deleted?: boolean;
 }

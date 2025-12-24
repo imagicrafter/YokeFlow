@@ -4,9 +4,9 @@ This file provides guidance to Claude Code when working with this repository.
 
 ## What This Is
 
-An autonomous coding agent that uses Claude to build complete applications over multiple sessions.
+**YokeFlow** - An autonomous AI development platform that uses Claude to build complete applications over multiple sessions.
 
-**Status**: Transitioning to **YokeFlow** - See `YOKEFLOW.md` for migration checklist
+**Status**: Production Ready - v1.0.0 (December 2025)
 
 **Architecture**: API-first platform with FastAPI + Next.js Web UI + PostgreSQL + MCP task management
 
@@ -19,12 +19,12 @@ An autonomous coding agent that uses Claude to build complete applications over 
 **Sessions 1+ (Coding)**: Get next task → Implement → Browser verify → Update database → Git commit → Auto-continue
 
 **Key Files**:
-- `orchestrator.py` - Session lifecycle
-- `agent.py` - Agent loop
-- `database.py` - PostgreSQL abstraction (async)
+- `core/orchestrator.py` - Session lifecycle
+- `core/agent.py` - Agent loop
+- `core/database.py` - PostgreSQL abstraction (async)
 - `api/main.py` - REST API + WebSocket
-- `observability.py` - Session logging (JSONL + TXT)
-- `security.py` - Blocklist validation
+- `core/observability.py` - Session logging (JSONL + TXT)
+- `core/security.py` - Blocklist validation
 - `prompts/` - Agent instructions
 
 
@@ -36,7 +36,7 @@ An autonomous coding agent that uses Claude to build complete applications over 
 
 **Key views**: `v_next_task`, `v_progress`, `v_epic_progress`
 
-**Access**: Use `database.py` abstraction (async/await). See `schema/postgresql/` for DDL.
+**Access**: Use `core/database.py` abstraction (async/await). See `schema/postgresql/` for DDL.
 
 ## MCP Tools
 
@@ -52,7 +52,7 @@ Must build before use: `cd mcp-task-manager && npm run build`
 
 ## Configuration
 
-**Priority**: CLI args > Config file (`.autonomous-coding.yaml`) > Defaults
+**Priority**: Web UI settings > Config file (`.yokeflow.yaml`) > Defaults
 
 **Key settings**:
 - `models.initializer` / `models.coding` - Override default Opus/Sonnet models
@@ -63,26 +63,39 @@ Must build before use: `cd mcp-task-manager && npm run build`
 
 **Blocklist approach**: Allows dev tools (npm, git, curl), blocks dangerous commands (rm, sudo, apt)
 
-Edit `security.py` `BLOCKED_COMMANDS` to modify. Safe in Docker containers.
+Edit `core/security.py` `BLOCKED_COMMANDS` to modify. Safe in Docker containers.
 
 ## Project Structure
 
 ```
-autonomous-coding/
+yokeflow/
+├── core/                    # Core platform modules
+│   ├── orchestrator.py      # Session lifecycle management
+│   ├── agent.py             # Agent loop and session logic
+│   ├── database.py          # PostgreSQL abstraction (async)
+│   ├── database_connection.py  # Connection pooling
+│   ├── client.py            # Claude SDK client setup
+│   ├── config.py            # Configuration management
+│   ├── observability.py     # Session logging (JSONL + TXT)
+│   ├── security.py          # Blocklist validation
+│   ├── progress.py          # Progress tracking
+│   ├── prompts.py           # Prompt loading
+│   ├── reset.py             # Project reset logic
+│   ├── sandbox_manager.py   # Docker sandbox management
+│   └── sandbox_hooks.py     # Sandbox hooks
+├── review/                  # Review system modules
+│   ├── review_client.py     # Automated deep reviews (Phase 2)
+│   ├── review_metrics.py    # Quality metrics (Phase 1)
+│   ├── review_agent.py      # Manual review tool
+│   └── prompt_improvement_analyzer.py  # Prompt optimization (Phase 4)
 ├── api/                     # FastAPI REST API
 ├── web-ui/                  # Next.js Web UI
-├── cli/                     # CLI tools (autonomous_agent, task_status, reset_project)
+├── scripts/                 # Utility tools (task_status, reset_project, cleanup_*)
 ├── mcp-task-manager/        # MCP server (TypeScript)
 ├── prompts/                 # Agent instructions (initializer, coding, review)
 ├── schema/postgresql/       # Database DDL
 ├── tests/                   # Test suites
 ├── docs/                    # Documentation
-├── orchestrator.py          # Session lifecycle
-├── agent.py                 # Agent loop
-├── database.py              # PostgreSQL abstraction
-├── observability.py         # Logging (JSONL + TXT)
-├── security.py              # Blocklist
-├── review_*.py              # Review system (Phase 1-4)
 └── generations/             # Generated projects
 ```
 
@@ -90,7 +103,7 @@ autonomous-coding/
 
 **PostgreSQL**: Production-ready, async operations, JSONB metadata, UUID-based IDs
 
-**Orchestrator**: Decouples session management from CLI, enables API control, foundation for job queues
+**Orchestrator**: Decouples session management, enables API control, foundation for job queues
 
 **MCP over Shell**: Protocol-based, structured I/O, no injection risks, language-agnostic
 
@@ -106,7 +119,7 @@ autonomous-coding/
 
 **Database error**: Ensure PostgreSQL running (`docker-compose up -d`), check DATABASE_URL in `.env`
 
-**Command blocked**: Check `security.py` BLOCKED_COMMANDS list
+**Command blocked**: Check `core/security.py` BLOCKED_COMMANDS list
 
 **Agent stuck**: Check logs in `generations/[project]/logs/`, run with `--verbose`
 
@@ -123,7 +136,7 @@ python tests/test_orchestrator.py        # Orchestrator
 
 ## Important Files
 
-**Core**: `orchestrator.py`, `agent.py`, `database.py`, `observability.py`, `security.py`
+**Core**: `core/orchestrator.py`, `core/agent.py`, `core/database.py`, `core/observability.py`, `core/security.py`, `core/config.py`
 
 **Prompts**: `prompts/initializer_prompt.md`, `prompts/coding_prompt.md`, `prompts/review_prompt.md`
 
@@ -133,31 +146,39 @@ python tests/test_orchestrator.py        # Orchestrator
 
 **Schema**: `schema/postgresql/001_initial_schema.sql`
 
-**Docs**: `docs/developer-guide.md`, `docs/review-system.md`, `README.md`, `TODO.md`
+**Docs**: `docs/developer-guide.md`, `docs/review-system.md`, `README.md`, `TODO.md` (pre-release), `TODO-FUTURE.md` (post-release)
 
-**Transition Docs**: `YOKEFLOW.md` (transition checklist), `PROMPT_IMPROVEMENT_SYSTEM.md` (Phase 4 refactoring status)
+**Transition Docs**: `YOKEFLOW.md` (transition checklist), `TODO.md` (pre-release tasks), `TODO-FUTURE.md` (post-release enhancements)
 
 **Review System**:
-- Phase 1: `review_metrics.py` - Quick checks (zero-cost) ✅ Production Ready
-- Phase 2: `review_client.py` - Deep reviews (AI-powered) ✅ Production Ready
+- Phase 1: `review/review_metrics.py` - Quick checks (zero-cost) ✅ Production Ready
+- Phase 2: `review/review_client.py` - Deep reviews (AI-powered) ✅ Production Ready
 - Phase 3: `web-ui/src/components/QualityDashboard.tsx` - UI dashboard ✅ Production Ready
-- Phase 4: `prompt_improvement_analyzer.py` - Prompt optimization ⚠️ Needs Refactoring (YokeFlow transition)
+- Phase 4: Prompt Improvement System - ⚠️ **ARCHIVED** (see `.archived-features/prompt-improvements/`) - Will be reimplemented post-release
 
 ## Recent Changes
 
+**December 23, 2025**:
+- ✅ **CLI Removed**: Removed `cli/yokeflow.py` in favor of Web UI (API-first architecture)
+- ✅ **Orchestrator Simplified**: Removed CLI compatibility functions from core/orchestrator.py
+- ✅ **Scripts Consolidated**: Moved utility tools from `cli/` to `scripts/` directory
+- ✅ **Utility Tools Retained**: Kept debugging/development tools (task_status, reset_project, cleanup_*)
+
 **December 2025**:
 - ✅ Review system Phases 1-3 complete (quick checks, deep reviews, UI dashboard)
-- ⚠️ Phase 4 (Prompt Improvement System) - Infrastructure complete, needs refactoring for YokeFlow
+- ✅ Prompt Improvement System (Phase 4) - Archived for post-release refactoring
 - ✅ PostgreSQL migration complete (UUID-based, async, connection pooling)
 - ✅ API-first platform with Next.js Web UI
 - ✅ Project completion tracking with celebration UI
 - ✅ Coding prompt improvements (browser verification enforcement, bash_docker mandate)
 - 🚀 **YokeFlow Transition**: Rebranding and repository migration in progress
+- ✅ **Code Organization**: Refactored to `core/` and `review/` modules for better structure
+- ✅ **Pre-Release Cleanup**: Experimental features archived, TODO split into pre/post-release
 
 **Key Evolution**:
 - Shell scripts → MCP (protocol-based task management)
 - JSONL + TXT dual logging (human + machine readable)
-- Autonomous coding → **YokeFlow** (next-generation branding)
+- Autonomous Coding → **YokeFlow** (production-ready platform)
 
 ## Philosophy
 
@@ -167,18 +188,21 @@ python tests/test_orchestrator.py        # Orchestrator
 
 **Core Principle**: One-shot success. Improve the agent system itself rather than fixing generated apps.
 
-## Transition Status
+## Release Status
 
-**Current State**: Maintenance mode - bug fixes only
+**Current State**: Production Ready - v1.0.0
 
-**Next Steps**:
-1. Complete Phase 4 refactoring (Prompt Improvement System)
-2. Execute YokeFlow transition checklist (`YOKEFLOW.md`)
-3. Rebrand and migrate to new repository
-4. Archive this repository with migration notice
+**Release Highlights**:
+- ✅ **Complete Platform**: All 7 phases of development complete
+- ✅ **Production Tested**: 31-session validation, 64 security tests passing
+- ✅ **Full Documentation**: Comprehensive guides, API docs, contribution guidelines
+- ✅ **Quality System**: Automated reviews, dashboard, trend tracking
+- ✅ **Professional Repository**: LICENSE, CONTRIBUTING.md, SECURITY.md, CI/CD
 
-**Active Development**: Moving to YokeFlow repository
+**Post-Release Roadmap**:
+- See `TODO-FUTURE.md` for planned enhancements
+- Per-user authentication, prompt improvements, E2B integration, and more
 
 ---
 
-**For detailed documentation, see `docs/` directory. Forked from Anthropic's autonomous coding demo with extensive enhancements.**
+**For detailed documentation, see `docs/` directory. Originally forked from Anthropic's autonomous coding demo, now evolved into YokeFlow with extensive enhancements.**

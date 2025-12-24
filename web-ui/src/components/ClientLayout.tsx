@@ -21,7 +21,7 @@ function Header() {
       <div className="max-w-7xl mx-auto px-8 py-4">
         <div className="flex items-center justify-between">
           <h1 className="text-xl font-bold">
-            Autonomous Coding Agent
+            YokeFlow
           </h1>
           <div className="flex items-center gap-6">
             <nav className="flex items-center gap-6 text-sm font-medium">
@@ -31,8 +31,8 @@ function Header() {
               <a href="/create" className="hover:text-blue-600 dark:hover:text-blue-400 transition-colors">
                 Create
               </a>
-              <a href="/prompt-improvements" className="hover:text-blue-600 dark:hover:text-blue-400 transition-colors">
-                Prompt Improvements
+              <a href="/containers" className="hover:text-blue-600 dark:hover:text-blue-400 transition-colors">
+                Containers
               </a>
             </nav>
             <ThemeToggle />
@@ -64,7 +64,7 @@ export function ClientLayout({ children }: { children: React.ReactNode }) {
             </main>
             <footer className="border-t border-gray-200 dark:border-gray-800 bg-white/80 dark:bg-gray-900/50 backdrop-blur">
               <div className="max-w-7xl mx-auto px-8 py-4 text-center text-sm text-gray-500 dark:text-gray-400">
-                Autonomous Coding Agent Platform
+                YokeFlow Platform
               </div>
             </footer>
           </div>

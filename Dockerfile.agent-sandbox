@@ -3,7 +3,7 @@
 # This is the Docker image used for running autonomous coding sessions.
 # It includes all tools the agent needs: Node.js, Playwright browsers, git, etc.
 #
-# Build: docker build -f Dockerfile.agent-sandbox -t autonomous-agent-sandbox:latest .
+# Build: docker build -f Dockerfile.agent-sandbox -t yokeflow-sandbox:latest .
 # Used by: sandbox_manager.py when creating Docker sandboxes
 
 FROM node:20-bookworm

@@ -1,6 +1,6 @@
 # Developer Guide
 
-This guide provides technical details for developers who want to understand, customize, or extend the autonomous coding agent system.
+This guide provides technical details for developers who want to understand, customize, or extend YokeFlow.
 
 ## Table of Contents
 
@@ -19,7 +19,7 @@ This guide provides technical details for developers who want to understand, cus
 
 ### System Components
 
-**API-First Architecture (Recommended):**
+**API-First Architecture:**
 ```
 ┌─────────────────┐
 │   Web Browser   │
@@ -82,28 +82,12 @@ This guide provides technical details for developers who want to understand, cus
 └─────────────────────────┘
 ```
 
-**CLI Architecture (For Testing/Scripting):**
-```
-┌─────────────────┐
-│  User/Terminal  │
-└────────┬────────┘
-         │
-         ▼
-┌─────────────────────┐
-│ autonomous_agent.py │  CLI entry point
-└────────┬────────────┘
-         │
-         ▼
-┌─────────────────────┐
-│  orchestrator.py    │  (Same flow as API from here)
-└─────────────────────┘
-```
 
 ### Data Flow
 
 **Initialization Flow:**
 ```
-User → autonomous_agent.py → agent.py → orchestrator.py
+User → yokeflow.py → agent.py → orchestrator.py
   ↓
 Create project in PostgreSQL database
   ↓
@@ -120,7 +104,7 @@ Auto-stop (complete roadmap ready)
 
 **Coding Flow:**
 ```
-User → autonomous_agent.py → agent.py
+User → yokeflow.py → agent.py
   ↓
 Load MCP client with task-manager server
   ↓
@@ -140,25 +124,8 @@ Agent loop:
 
 ## Core Components
 
-### autonomous_agent.py
 
-**Purpose:** Entry point and CLI argument parsing
-
-**Key Functions:**
-- `parse_args()` - Parse command-line arguments
-- `main()` - Determine models, resolve project path, call agent loop
-
-**Model Selection Logic:**
-```python
-if args.model:
-    initializer_model = args.model
-    coding_model = args.model
-else:
-    initializer_model = args.initializer_model  # Default: Opus
-    coding_model = args.coding_model            # Default: Sonnet
-```
-
-### agent.py
+### core/agent.py
 
 **Purpose:** Core agent session logic
 
@@ -197,7 +164,7 @@ else:
     # Auto-continue with delay
 ```
 
-### client.py
+### core/client.py
 
 **Purpose:** Claude SDK client configuration
 
@@ -225,7 +192,7 @@ mcp_servers = {
 }
 ```
 
-### prompts.py
+### core/prompts.py
 
 **Purpose:** Prompt loading and project setup
 
@@ -237,7 +204,7 @@ mcp_servers = {
 
 `copy_spec_to_project()` - Copy app_spec.txt to project
 
-### security.py
+### core/security.py
 
 **Purpose:** Bash command blocklist validation
 
@@ -263,7 +230,7 @@ def validate_bash_command(command: str) -> tuple[bool, str]:
     # Return True/False + explanation
 ```
 
-### observability.py
+### core/observability.py
 
 **Purpose:** Session logging and output filtering
 
@@ -283,13 +250,13 @@ def validate_bash_command(command: str) -> tuple[bool, str]:
 **Log Structure:**
 ```
 generations/[project]/logs/
-├── session_001_20241209_140523.jsonl  # Machine-readable
-└── session_001_20241209_140523.txt    # Human-readable
+├── session_001_20251209_140523.jsonl  # Machine-readable
+└── session_001_20251209_140523.txt    # Human-readable
 
 Note: Session metrics stored in PostgreSQL (sessions.metrics JSONB field)
 ```
 
-### progress.py
+### core/progress.py
 
 **Purpose:** Progress tracking utilities
 
@@ -298,13 +265,12 @@ Note: Session metrics stored in PostgreSQL (sessions.metrics JSONB field)
 `get_progress_from_db(project_dir)`:
 - Queries v_progress view
 - Returns dict with completion stats
-- Used by Web UI and CLI tool
 
 `print_progress_summary(project_dir)`:
 - Terminal output of current progress
 - Called between sessions
 
-### database.py
+### core/database.py
 
 **Purpose:** PostgreSQL database abstraction layer with async operations
 
@@ -326,7 +292,7 @@ Note: Session metrics stored in PostgreSQL (sessions.metrics JSONB field)
 
 **Usage Example:**
 ```python
-from database_connection import DatabaseManager
+from core.database_connection import DatabaseManager
 
 async with DatabaseManager() as db:
     progress = await db.get_progress(project_id)
@@ -334,7 +300,7 @@ async with DatabaseManager() as db:
     await db.update_task_status(task_id=5, done=True)
 ```
 
-### orchestrator.py
+### core/orchestrator.py
 
 **Purpose:** Agent orchestration service for API-driven control
 
@@ -358,7 +324,7 @@ async with DatabaseManager() as db:
 
 **Usage Example:**
 ```python
-from orchestrator import AgentOrchestrator
+from core.orchestrator import AgentOrchestrator
 
 orchestrator = AgentOrchestrator(verbose=False)
 session_info = await orchestrator.start_session(
@@ -682,7 +648,7 @@ BLOCKED_COMMANDS = {
 
 **JSONL Format** (machine-readable):
 ```json
-{"type": "prompt", "content": "...", "timestamp": "2024-12-09T14:05:23Z"}
+{"type": "prompt", "content": "...", "timestamp": "2025-12-09T14:05:23Z"}
 {"type": "assistant_text", "content": "...", "timestamp": "..."}
 {"type": "tool_use", "name": "Bash", "input": {...}, "timestamp": "..."}
 {"type": "tool_result", "content": "...", "is_error": false, "timestamp": "..."}
@@ -912,7 +878,7 @@ python tests/test_security.py
 python tests/test_mcp.py
 
 # Test with real project
-python autonomous_agent.py --project-dir test-proj --max-iterations 2
+python yokeflow.py --project-dir test-proj --max-iterations 2
 ```
 
 4. **Update documentation:**
@@ -1002,7 +968,7 @@ BLOCKED_COMMANDS = {
 **Inspect database:**
 ```bash
 # Connect to PostgreSQL
-psql -d autonomous_coding
+psql $DATABASE_URL
 
 # View schema
 \d projects
@@ -1117,12 +1083,12 @@ RUN cd web-ui && npm install && npm run build
 
 # Run API server (or agent CLI)
 CMD ["uvicorn", "api.main:app", "--host", "0.0.0.0", "--port", "8000"]
-# Alternative: CMD ["python", "autonomous_agent.py", "--project-dir", "/workspace"]
+# Alternative: CMD ["python", "yokeflow.py", "--project-dir", "/workspace"]
 ```
 
 **Volume mounts:**
 ```bash
-docker run -v $(pwd)/generations:/workspace autonomous-agent
+docker run -v $(pwd)/generations:/workspace yokeflow
 ```
 
 ### Cloud Deployment
@@ -1142,7 +1108,7 @@ docker run -v $(pwd)/generations:/workspace autonomous-agent
 - ✅ JWT authentication implemented (production-ready)
 - ✅ PostgreSQL in production (async operations, connection pooling)
 
-See [PROPOSED_ENHANCEMENTS.md](../PROPOSED_ENHANCEMENTS.md) and [api/README.md](../api/README.md) for details.
+See [TODO.md](../TODO.md) and [api/README.md](../api/README.md) for details.
 
 ---
 
@@ -1157,4 +1123,4 @@ See [PROPOSED_ENHANCEMENTS.md](../PROPOSED_ENHANCEMENTS.md) and [api/README.md](
 
 ---
 
-**Questions or need help?** See [CLAUDE.md](../CLAUDE.md) for context restoration, or check [PROPOSED_ENHANCEMENTS.md](../PROPOSED_ENHANCEMENTS.md) for roadmap.
+See [CLAUDE.md](../CLAUDE.md) for context restoration.

@@ -1,6 +1,7 @@
 {
-  "name": "web-ui",
-  "version": "0.1.0",
+  "name": "yokeflow-web-ui",
+  "version": "1.0.0",
+  "description": "YokeFlow web interface - autonomous AI development platform",
   "private": true,
   "scripts": {
     "dev": "NODE_OPTIONS='--max-old-space-size=4096' next dev",

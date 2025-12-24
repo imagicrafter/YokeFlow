@@ -57,7 +57,7 @@ export default function LoginPage() {
         {/* Header */}
         <div className="text-center mb-8">
           <h1 className="text-4xl font-bold text-gray-100 mb-2">
-            Autonomous Coding Agent
+            YokeFlow
           </h1>
           <p className="text-gray-400">
             Sign in to access the platform

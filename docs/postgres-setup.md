@@ -1,6 +1,6 @@
 # PostgreSQL Setup Guide
 
-This guide walks through setting up PostgreSQL for the autonomous coding agent platform.
+This guide walks through setting up PostgreSQL for the YokeFlow platform.
 
 ## Quick Start (Local Development with Docker)
 
@@ -20,7 +20,7 @@ docker-compose logs postgres
 The database will be available at:
 - **Host**: localhost
 - **Port**: 5432
-- **Database**: autonomous_coding
+- **Database**: yokeflow
 - **Username**: agent
 - **Password**: agent_dev_password
 
@@ -56,7 +56,7 @@ If you want a GUI to manage the database:
 docker-compose --profile tools up -d
 
 # Login credentials:
-# Email: admin@autonomous-coding.local
+# Email: admin@yokeflow.local
 # Password: admin
 ```
 
@@ -89,7 +89,7 @@ python scripts/init_database.py --url "$DATABASE_URL"
 
 ```bash
 # Local Docker
-docker exec -it autonomous_coding_postgres psql -U agent -d autonomous_coding
+docker exec -it yokeflow-postgres psql -U agent -d yokeflow
 
 # Production
 psql "$DATABASE_URL"
@@ -124,10 +124,10 @@ SELECT * FROM v_active_sessions;
 
 ```bash
 # Backup
-docker exec autonomous_coding_postgres pg_dump -U agent autonomous_coding > backup.sql
+docker exec yokeflow-postgres pg_dump -U agent yokeflow > backup.sql
 
 # Restore
-docker exec -i autonomous_coding_postgres psql -U agent autonomous_coding < backup.sql
+docker exec -i yokeflow-postgres psql -U agent yokeflow < backup.sql
 ```
 
 ## Troubleshooting
@@ -142,7 +142,7 @@ ports:
   - "5433:5432"  # Use port 5433 instead
 
 # Update DATABASE_URL in .env
-DATABASE_URL=postgresql://agent:agent_dev_password@localhost:5433/autonomous_coding
+DATABASE_URL=postgresql://agent:agent_dev_password@localhost:5433/yokeflow
 ```
 
 ### Connection Refused

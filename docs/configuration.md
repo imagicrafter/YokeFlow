@@ -1,41 +1,38 @@
 # Configuration File Guide
 
-The autonomous coding agent supports YAML configuration files for managing settings without command-line flags.
+YokeFlow supports YAML configuration files for managing default settings. Configuration is primarily managed through the Web UI, but YAML files provide defaults.
 
 ## Quick Start
 
 1. **Copy the example config:**
    ```bash
-   cp .autonomous-coding.yaml.example .autonomous-coding.yaml
+   cp .yokeflow.yaml.example .yokeflow.yaml
    ```
 
-2. **Edit settings** in `.autonomous-coding.yaml`
+2. **Edit settings** in `.yokeflow.yaml`
 
-3. **Run the agent** (config is automatically detected):
-   ```bash
-   python autonomous_agent.py --project-dir my_project
-   ```
+3. **Settings are used by:**
+   - Web UI (for default model selections)
+   - API endpoints
+   - Utility scripts
 
 ## Configuration File Locations
 
-The agent looks for configuration files in this order:
+The system looks for configuration files in this order:
 
-1. **Custom path** via `--config` flag:
-   ```bash
-   python autonomous_agent.py --config my-config.yaml --project-dir my_project
-   ```
-
-2. **Current directory**: `.autonomous-coding.yaml`
+1. **Current directory**: `.yokeflow.yaml`
    - Project-specific settings
    - Checked first
 
-3. **Home directory**: `~/.autonomous-coding.yaml`
+2. **Home directory**: `~/.yokeflow.yaml`
    - Global defaults for all projects
    - Checked if no local config exists
 
-4. **Built-in defaults**
+3. **Built-in defaults**
    - Used if no config file found
-   - See [config.py](../config.py) for default values
+   - See [core/config.py](../core/config.py) for default values
+
+**Note**: Web UI settings (selected during project creation) override config file defaults.
 
 ## Configuration Options
 
@@ -91,20 +88,20 @@ project:
 
 Settings are applied in this order (highest priority first):
 
-1. **Command-line arguments** (always win)
-   ```bash
-   python autonomous_agent.py --model claude-opus-4-5-20251101 --project-dir my_project
-   ```
+1. **Web UI selections** (when creating/initializing projects)
+   - Model selection dropdowns
+   - Project-specific settings
 
-2. **Configuration file** (--config or auto-detected)
+2. **Configuration file** (provides defaults)
    ```yaml
    models:
+     initializer: claude-opus-4-5-20251101
      coding: claude-sonnet-4-5-20250929
    ```
 
 3. **Built-in defaults** (fallback)
    ```python
-   # From config.py
+   # From core/config.py
    initializer: "claude-opus-4-5-20251101"
    coding: "claude-sonnet-4-5-20250929"
    ```
@@ -113,7 +110,7 @@ Settings are applied in this order (highest priority first):
 
 ### Example 1: Basic Config
 
-Create `.autonomous-coding.yaml` in project directory:
+Create `.yokeflow.yaml` in current directory:
 
 ```yaml
 models:
@@ -121,129 +118,72 @@ models:
   coding: claude-sonnet-4-5-20250929
 
 timing:
-  auto_continue_delay: 5  # Slower pace
-```
-
-Run agent (uses config automatically):
-```bash
-python autonomous_agent.py --project-dir my_project
-```
-
-### Example 2: Override Config
-
-Config file has Sonnet for coding, but you want Opus:
-
-```bash
-python autonomous_agent.py --project-dir my_project --coding-model claude-opus-4-5-20251101
-```
-
-CLI argument overrides config file.
-
-### Example 3: Global Defaults
-
-Create `~/.autonomous-coding.yaml` for all projects:
-
-```yaml
-models:
-  initializer: claude-opus-4-5-20251101
-  coding: claude-sonnet-4-5-20250929
+  auto_continue_delay: 5  # Slower pace between sessions
 
 project:
-  default_generations_dir: my-projects
-  max_iterations: 10  # Safety limit
+  default_generations_dir: generations
 ```
 
-Every project uses these defaults unless overridden.
+The Web UI will use these as defaults when creating new projects.
 
-### Example 4: Project-Specific Config
+### Example 2: Global Config
 
-Different settings for a specific project:
+Create `~/.yokeflow.yaml` for global defaults:
 
-```bash
-cd my-special-project
-```
-
-Create `.autonomous-coding.yaml`:
 ```yaml
 models:
-  coding: claude-opus-4-5-20251101  # Use Opus for this complex project
-
-timing:
-  auto_continue_delay: 10  # Slower for debugging
+  initializer: claude-opus-4-5-20251101
+  coding: claude-sonnet-4-5-20250929
 ```
 
-This project uses Opus, other projects use global defaults.
+These defaults apply to all projects on this machine.
+
+### Example 3: Development vs Production
+
+You can use different configs for different scenarios by placing them in different directories:
+
+**Development** (`.yokeflow.yaml`):
+```yaml
+models:
+  initializer: claude-opus-4-5-20251101
+  coding: claude-sonnet-4-5-20250929  # Fast, cost-effective
+
+timing:
+  auto_continue_delay: 1  # Quick iteration
+```
+
+**Production** (`~/.yokeflow.yaml`):
+```yaml
+models:
+  initializer: claude-opus-4-5-20251101
+  coding: claude-opus-4-5-20251101  # Higher quality
+
+timing:
+  auto_continue_delay: 5  # Slower, more stable
+```
 
 ## Validation
 
 The config system validates settings on load:
 
-- Invalid YAML → error message
-- Missing file (--config specified) → error
-- Missing file (auto-detect) → use defaults
+- Invalid YAML → error message shown in Web UI/API logs
+- Missing file (auto-detect) → use built-in defaults
 - Invalid model names → passed through (API will validate)
 
-## Debugging
+## Complete Example
 
-See which config was loaded:
-
-```bash
-python autonomous_agent.py --project-dir my_project
-# Output: "Loaded configuration from: .autonomous-coding.yaml (current directory)"
-```
-
-Possible outputs:
-- `Loaded configuration from: <path>` (config found)
-- `Using default configuration (no config file found)` (using defaults)
-
-## Advanced Usage
-
-### Per-Project Config Template
-
-Create a config template for new projects:
-
-```bash
-# In your project template
-cp .autonomous-coding.yaml.example new-project/.autonomous-coding.yaml
-cd new-project
-# Edit settings
-python ../autonomous_agent.py --project-dir .
-```
-
-### Config Generator
-
-Generate a config from current defaults:
-
-```python
-from config import Config
-
-config = Config()
-with open('.autonomous-coding.yaml', 'w') as f:
-    f.write(config.to_yaml())
-```
-
-### Multiple Config Files
-
-Use different configs for different scenarios:
-
-```bash
-# Development config
-python autonomous_agent.py --config dev-config.yaml --project-dir my_project
-
-# Production config
-python autonomous_agent.py --config prod-config.yaml --project-dir my_project
-```
+See [.yokeflow.yaml.example](../.yokeflow.yaml.example) for a complete configuration file with all available options and comments.
 
 ## Best Practices
 
-1. **Use global config** (`~/.autonomous-coding.yaml`) for personal defaults
-2. **Use local config** (`.autonomous-coding.yaml`) for project-specific needs
+1. **Use global config** (`~/.yokeflow.yaml`) for personal defaults
+2. **Use local config** (`.yokeflow.yaml`) for project-specific needs
 3. **Add to .gitignore** if config contains sensitive paths
-4. **Version control** `.autonomous-coding.yaml.example` as a template
+4. **Version control** `.yokeflow.yaml.example` as a template
 5. **Document** any non-standard settings in project README
 
 ## See Also
 
 - [config.py](../config.py) - Configuration implementation
-- [.autonomous-coding.yaml.example](../.autonomous-coding.yaml.example) - Full example with comments
-- [autonomous_agent.py](../autonomous_agent.py) - How config is loaded and used
+- [.yokeflow.yaml.example](../.yokeflow.yaml.example) - Full example with comments
+

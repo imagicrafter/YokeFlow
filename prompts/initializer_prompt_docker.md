@@ -233,86 +233,6 @@ bash_docker({ command: "npm install" })  // File is already there!
 
 ---
 
-## 🔧 SERVER LIFECYCLE MANAGEMENT (DOCKER MODE)
-
-**CRITICAL - Docker Requires Full Server Restart Between Sessions**
-
-**Why Docker is Different:**
-- Docker port forwarding can become stale between sessions
-- Container may restart, breaking port mappings
-- Servers from previous session may hold ports in undefined state
-- **MUST kill all servers at START and END of each session**
-
-### At START of Session (MANDATORY)
-
-**Always kill all servers before starting work:**
-
-```bash
-# Kill ALL node/vite processes (including from previous sessions)
-mcp__task-manager__bash_docker({ command: "pkill -f 'node.*index.js' || true" })
-mcp__task-manager__bash_docker({ command: "pkill -f 'vite|npm run dev' || true" })
-mcp__task-manager__bash_docker({ command: "sleep 1" })
-
-# Verify all stopped
-mcp__task-manager__bash_docker({ command: "curl -s http://localhost:3001/health && echo '⚠️ Backend still running' || echo '✅ All stopped'" })
-mcp__task-manager__bash_docker({ command: "curl -s http://localhost:5173 > /dev/null 2>&1 && echo '⚠️ Frontend still running' || echo '✅ All stopped'" })
-```
-
-**Then start fresh servers:**
-```bash
-# Start servers
-mcp__task-manager__bash_docker({ command: "chmod +x init.sh && ./init.sh" })
-
-# Wait for startup (Docker is slower than host)
-mcp__task-manager__bash_docker({ command: "sleep 8" })
-
-# Health check loop
-mcp__task-manager__bash_docker({
-  command: "for i in {1..10}; do curl -s http://localhost:5173 > /dev/null && echo '✅ Frontend ready' && break; sleep 1; done"
-})
-```
-
-### At END of Session (MANDATORY)
-
-**Always kill all servers cleanly:**
-
-```bash
-# Stop all servers
-mcp__task-manager__bash_docker({ command: "pkill -f 'node.*index.js' || true" })
-mcp__task-manager__bash_docker({ command: "pkill -f 'vite|npm run dev' || true" })
-mcp__task-manager__bash_docker({ command: "sleep 1" })
-
-# Verify stopped
-mcp__task-manager__bash_docker({ command: "curl -s http://localhost:3001/health && echo '⚠️ Backend still running' || echo '✅ Backend stopped'" })
-mcp__task-manager__bash_docker({ command: "curl -s http://localhost:5173 > /dev/null 2>&1 && echo '⚠️ Frontend still running' || echo '✅ Frontend stopped'" })
-```
-
-**Why this is necessary:**
-- Port forwarding reset between sessions
-- Container may have restarted
-- Prevents "port in use" errors
-- Ensures clean state for next session
-
-### During Session - Restart Only When Code Changes
-
-**Only restart if you modify backend code:**
-
-```bash
-# Kill backend only
-mcp__task-manager__bash_docker({ command: "pkill -f 'node.*index.js' || true && sleep 1" })
-
-# Restart backend
-mcp__task-manager__bash_docker({ command: "(cd server && node index.js > ../server.log 2>&1 &)" })
-mcp__task-manager__bash_docker({ command: "sleep 3" })
-
-# Verify
-mcp__task-manager__bash_docker({ command: "curl -s http://localhost:3001/health && echo '✅ Backend restarted'" })
-```
-
-**Frontend (Vite) auto-reloads - no manual restart needed during session.**
-
----
-
 ## ⏱️ DOCKER TIMING CONSIDERATIONS
 
 **Servers take LONGER to start in Docker than on host:**
@@ -353,7 +273,7 @@ mcp__task-manager__bash_docker({
 # Initializer Agent Prompt (v4 - MCP with Batching Efficiency)
 
 **Version History:**
-- v4 (Dec 12, 2024): Added batching guidance for epic and test creation (30-40% faster initialization)
+- v4 (Dec 12, 2025): Added batching guidance for epic and test creation (30-40% faster initialization)
 - v3: MCP-Based Hierarchical Approach
 - v2: Task expansion improvements
 - v1: Initial version
@@ -373,14 +293,46 @@ Your job is to set up the foundation for all future coding agents.
 
 ## FIRST: Read the Project Specification
 
-**IMPORTANT**: First run `pwd` to see your current working directory, then read
-`app_spec.txt` from that directory. DO NOT use any hardcoded or remembered paths.
+**IMPORTANT**: First run `pwd` to see your current working directory.
 
-The file `app_spec.txt` is in your current working directory and contains the complete
-specification for what you need to build. Read it carefully before proceeding.
+The specification may be in one of two locations:
+
+### Option 1: Single File (app_spec.txt)
+If you see `app_spec.txt` in your working directory and it contains the full specification,
+read it and proceed.
+
+### Option 2: Multiple Files (spec/ directory)
+If `app_spec.txt` mentions a `spec/` directory, you have multiple specification files:
+
+1. **Read app_spec.txt first** - It will tell you which file is primary
+2. **Read the primary file** (usually `main.md` or `spec.md`)
+3. **Lazy-load additional files** - Only read them when you need specific details
+4. **Search when needed** - Use `grep -r "search term" spec/` to find information
+
+**Example workflow:**
+```bash
+# Check what's available
+cat app_spec.txt
+
+# If it says "primary file: spec/main.md"
+cat spec/main.md
+
+# If main.md references "see api-design.md for endpoints"
+# Read it only when implementing the API:
+cat spec/api-design.md
+
+# Search across all specs if needed
+grep -r "authentication" spec/
+```
+
+**Context Management (Important!):**
+- ❌ Don't read all spec files upfront (wastes tokens)
+- ✅ Follow references in the primary file
+- ✅ Read additional files only when needed for your current task
+- ✅ Use grep to search across files when looking for specific information
 
 **This is critical** - all epics, tasks, and the project structure must be
-derived from what's in app_spec.txt in YOUR CURRENT WORKING DIRECTORY.
+derived from the specification in YOUR CURRENT WORKING DIRECTORY.
 
 ---
 

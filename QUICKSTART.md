@@ -1,6 +1,6 @@
 # Quick Start Guide
 
-This guide will get you up and running with the Autonomous Coding Agent Platform in 5 minutes.
+This guide will get you up and running with YokeFlow in 5 minutes.
 
 ## Prerequisites
 
@@ -42,12 +42,10 @@ This guide will get you up and running with the Autonomous Coding Agent Platform
 
 ## Starting the Platform
 
-### Option 1: Web UI (Recommended)
-
 **Terminal 1 - Start API Server:**
 ```bash
-# Using wrapper script (recommended - auto-reload disabled for stability)
-python start_api.py
+# Using wrapper script (recommended)
+python api/start_api.py
 
 # OR using uvicorn directly (add --reload only if developing API code)
 uvicorn api.main:app --host 0.0.0.0 --port 8000
@@ -130,7 +128,7 @@ cp .env.example .env
 
 2. **Check Database:**
    ```bash
-   psql postgresql://agent:agent_dev_password@localhost:5432/autonomous_coding -c "SELECT 1;"
+   psql postgresql://agent:agent_dev_password@localhost:5432/yokeflow -c "SELECT 1;"
    # Should return: 1
    ```
 
@@ -157,8 +155,9 @@ cp .env.example .env
 ## Documentation
 
 - [README.md](README.md) - Full platform overview
-- [CLAUDE.md](CLAUDE.md) - Comprehensive developer guide
-- [api/README.md](api/README.md) - API documentation
+- [CLAUDE.md](CLAUDE.md) - Quick reference guide
+- [docs/developer-guide.md](docs/developer-guide.md) - Comprehensive technical guide
+- [docs/api-usage.md](docs/api-usage.md) - API documentation
 - [TODO.md](TODO.md) - Roadmap and future features
 
 ## Getting Help
@@ -170,16 +169,23 @@ cp .env.example .env
 ## Pro Tips
 
 1. **Use Opus for initialization, Sonnet for coding** (default behavior)
-2. **Reset projects without initializing again**
-   - Reset to the state after initilization but before coding started
-   - Saves 10-20 minutes by not initializing again
+2. **Reset projects without re-initializing:**
+   ```bash
+   python scripts/reset_project.py --project my_project
+   ```
+   - Resets to state after initialization but before coding started
+   - Saves 10-20 minutes by preserving the complete roadmap
 3. **Review session quality:**
    ```bash
-   python review_agent.py --project generations/my_project --session 5 --quick
+   python review/review_agent.py --project my_project --session 5 --quick
    ```
-4. **Monitor with CLI tools:**
+4. **Monitor with utility scripts:**
    ```bash
-   python task_status.py generations/my_project
+   python scripts/task_status.py my_project
+   ```
+5. **Clean up stuck sessions:**
+   ```bash
+   python scripts/cleanup_sessions.py --project my_project
    ```
 
 ---

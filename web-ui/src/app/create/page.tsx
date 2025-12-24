@@ -8,7 +8,7 @@ import { api } from '@/lib/api';
 export default function CreateProjectPage() {
   const router = useRouter();
   const [projectName, setProjectName] = useState('');
-  const [specFile, setSpecFile] = useState<File | null>(null);
+  const [specFiles, setSpecFiles] = useState<File[]>([]);
   const [sandboxType, setSandboxType] = useState<'docker' | 'local'>('docker');
   const [initializerModel, setInitializerModel] = useState('claude-opus-4-5-20251101');
   const [codingModel, setCodingModel] = useState('claude-sonnet-4-5-20250929');
@@ -18,12 +18,13 @@ export default function CreateProjectPage() {
   const [nameValidationError, setNameValidationError] = useState<string | null>(null);
 
   function handleFileChange(e: React.ChangeEvent<HTMLInputElement>) {
-    const file = e.target.files?.[0];
-    if (file) {
-      setSpecFile(file);
-      // Auto-fill project name from filename if empty
+    const files = Array.from(e.target.files || []);
+    if (files.length > 0) {
+      setSpecFiles(files);
+
+      // Auto-fill project name from first file if empty
       if (!projectName) {
-        const name = file.name
+        const name = files[0].name
           .replace(/\.(txt|md)$/, '')
           .toLowerCase()
           .replace(/[^a-z0-9_-]+/g, '-')  // Replace invalid chars with hyphens
@@ -35,18 +36,41 @@ export default function CreateProjectPage() {
 
   function handleDrop(e: React.DragEvent) {
     e.preventDefault();
-    const file = e.dataTransfer.files?.[0];
-    if (file) {
-      setSpecFile(file);
-      if (!projectName) {
-        const name = file.name
-          .replace(/\.(txt|md)$/, '')
-          .toLowerCase()
-          .replace(/[^a-z0-9_-]+/g, '-')  // Replace invalid chars with hyphens
-          .replace(/^-+|-+$/g, '');        // Remove leading/trailing hyphens
-        setProjectName(name);
+    const files = Array.from(e.dataTransfer.files);
+
+    if (files.length > 0) {
+      // Filter to allowed file types (spec files + code examples)
+      const allowedExtensions = ['.txt', '.md', '.py', '.ts', '.js', '.tsx', '.jsx', '.json', '.yaml', '.yml', '.sql', '.sh', '.css', '.html'];
+      const validFiles = files.filter(f =>
+        allowedExtensions.some(ext => f.name.endsWith(ext))
+      );
+
+      if (validFiles.length > 0) {
+        // Append to existing files instead of replacing
+        setSpecFiles(prevFiles => {
+          // Filter out duplicates (same filename)
+          const newFiles = validFiles.filter(newFile =>
+            !prevFiles.some(existingFile => existingFile.name === newFile.name)
+          );
+          return [...prevFiles, ...newFiles];
+        });
+
+        // Auto-fill project name from first .md or .txt file if empty
+        if (!projectName) {
+          const primaryFile = validFiles.find(f => f.name.endsWith('.md') || f.name.endsWith('.txt')) || validFiles[0];
+          const name = primaryFile.name
+            .replace(/\.(txt|md|py|ts|js|tsx|jsx|json|yaml|yml|sql|sh|css|html)$/, '')
+            .toLowerCase()
+            .replace(/[^a-z0-9_-]+/g, '-')  // Replace invalid chars with hyphens
+            .replace(/^-+|-+$/g, '');        // Remove leading/trailing hyphens
+          setProjectName(name);
+        }
       }
     }
+  }
+
+  function removeFile(index: number) {
+    setSpecFiles(specFiles.filter((_, i) => i !== index));
   }
 
   function handleDragOver(e: React.DragEvent) {
@@ -68,18 +92,18 @@ export default function CreateProjectPage() {
       return;
     }
 
-    if (!specFile) {
-      setError('Specification file is required');
+    if (specFiles.length === 0) {
+      setError('At least one specification file is required');
       return;
     }
 
     setIsCreating(true);
 
     try {
-      // Create project with spec file upload
+      // Create project with spec file(s) upload
       const result = await api.createProjectWithFile(
         projectName,
-        specFile,
+        specFiles.length === 1 ? specFiles[0] : specFiles,
         false,
         sandboxType,
         initializerModel,
@@ -158,29 +182,31 @@ export default function CreateProjectPage() {
         {/* Spec File Upload */}
         <div>
           <label className="block text-sm font-medium text-gray-300 mb-2">
-            Specification File *
+            Specification File(s) *
           </label>
           <div
             onDrop={handleDrop}
             onDragOver={handleDragOver}
             className="border-2 border-dashed border-gray-700 rounded-lg p-8 text-center hover:border-gray-600 transition-colors cursor-pointer"
           >
-            {specFile ? (
+            {specFiles.length > 0 ? (
               <div className="space-y-3">
                 <div className="text-4xl">📄</div>
                 <div>
-                  <div className="text-gray-300 font-medium">{specFile.name}</div>
+                  <div className="text-gray-300 font-medium">
+                    {specFiles.length} file{specFiles.length > 1 ? 's' : ''} selected
+                  </div>
                   <div className="text-sm text-gray-500">
-                    {(specFile.size / 1024).toFixed(1)} KB
+                    {(specFiles.reduce((sum, f) => sum + f.size, 0) / 1024).toFixed(1)} KB total
                   </div>
                 </div>
                 <button
                   type="button"
-                  onClick={() => setSpecFile(null)}
+                  onClick={() => setSpecFiles([])}
                   className="text-sm text-blue-400 hover:text-blue-300"
                   disabled={isCreating}
                 >
-                  Remove file
+                  Remove all files
                 </button>
               </div>
             ) : (
@@ -196,7 +222,7 @@ export default function CreateProjectPage() {
                   <span className="text-gray-500"> or drag and drop</span>
                 </div>
                 <div className="text-sm text-gray-500">
-                  app_spec.txt, spec.md, or any text file
+                  Specs (.txt, .md) + Code examples (.py, .ts, .js, etc.)
                 </div>
               </div>
             )}
@@ -204,11 +230,57 @@ export default function CreateProjectPage() {
               type="file"
               id="fileInput"
               onChange={handleFileChange}
-              accept=".txt,.md"
+              accept=".txt,.md,.py,.ts,.js,.tsx,.jsx,.json,.yaml,.yml,.sql,.sh,.css,.html"
+              multiple
               className="hidden"
               disabled={isCreating}
             />
           </div>
+
+          {/* Selected Files List */}
+          {specFiles.length > 0 && (
+            <div className="mt-3 space-y-2">
+              <div className="text-sm font-medium text-gray-400">
+                Selected files:
+              </div>
+              {specFiles.map((file, index) => (
+                <div
+                  key={index}
+                  className="flex items-center justify-between p-3 bg-gray-900 rounded-lg border border-gray-800"
+                >
+                  <div className="flex items-center gap-3">
+                    <span className="text-2xl">📄</span>
+                    <div>
+                      <div className="text-sm text-gray-300">{file.name}</div>
+                      <div className="text-xs text-gray-500">
+                        {(file.size / 1024).toFixed(1)} KB
+                      </div>
+                    </div>
+                  </div>
+                  <button
+                    type="button"
+                    onClick={() => removeFile(index)}
+                    className="text-red-400 hover:text-red-300 text-sm px-3 py-1"
+                    disabled={isCreating}
+                  >
+                    ✕
+                  </button>
+                </div>
+              ))}
+            </div>
+          )}
+
+          {/* Helpful Hint for Multiple Files */}
+          {specFiles.length > 1 && (
+            <div className="mt-3 p-3 bg-blue-950/30 border border-blue-900/50 rounded-lg">
+              <div className="flex gap-2">
+                <span className="text-blue-400 flex-shrink-0">💡</span>
+                <div className="text-sm text-blue-300">
+                  <strong>Tip:</strong> Name your main spec file <code className="bg-blue-900/30 px-1 rounded">main.md</code> or <code className="bg-blue-900/30 px-1 rounded">spec.md</code>. The agent will read it first, then load other files (including code examples) as needed for reference.
+                </div>
+              </div>
+            </div>
+          )}
         </div>
 
         {/* Sandbox Type */}
@@ -304,7 +376,7 @@ export default function CreateProjectPage() {
           </Link>
           <button
             type="submit"
-            disabled={isCreating || !projectName || !specFile || !!nameValidationError}
+            disabled={isCreating || !projectName || specFiles.length === 0 || !!nameValidationError}
             className="px-6 py-3 bg-blue-600 hover:bg-blue-700 disabled:bg-blue-800 disabled:cursor-not-allowed text-white rounded-lg transition-colors font-medium"
           >
             {isCreating ? 'Creating...' : 'Create Project'}

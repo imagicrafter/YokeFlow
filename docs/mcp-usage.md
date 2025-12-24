@@ -1,89 +1,52 @@
-# MCP-Based Task Management
+# MCP Task Management
 
-## Overview
+YokeFlow uses MCP (Model Context Protocol) for all task management operations. This provides a structured, type-safe, protocol-based interface for agents to manage tasks.
 
-The autonomous coding agent uses MCP (Model Context Protocol) for all task management operations. This provides a structured, type-safe, protocol-based interface for managing tasks.
+**For detailed MCP server documentation, see [mcp-task-manager/README.md](../mcp-task-manager/README.md)**
 
-**Note:** MCP is the only supported mode. Shell-based task management (`task-helper.sh`) has been removed.
+---
 
-## Running the Agent
+## Quick Start
 
-### Basic Usage
+### Running the Agent
 
-To run the autonomous agent:
+The MCP task manager is automatically enabled when you run sessions:
 
 ```bash
-python autonomous_agent.py --project-dir my_project
+# Via Web UI
+# Navigate to http://localhost:3000 and click "Start Session"
 ```
 
-The MCP task manager is automatically enabled - no flags needed.
+No configuration needed - MCP is automatically set up.
 
-### Command-Line Options
+### Testing MCP
 
-- `--verbose` - Show detailed output
-- `--max-iterations N` - Limit the number of iterations
-- `--model MODEL` - Override both initializer and coding models
-- `--initializer-model MODEL` - Specify model for initialization (default: claude-opus-4-5-20251101)
-- `--coding-model MODEL` - Specify model for coding sessions (default: claude-sonnet-4-5-20250929)
-
-**Example - Using defaults (Opus for init, Sonnet for coding)**:
-```bash
-python autonomous_agent.py --project-dir my_project
-```
-
-**Example - Override just the coding model**:
-```bash
-python autonomous_agent.py --project-dir my_project --coding-model claude-opus-4-5-20251101
-```
-
-## Testing MCP
-
-Before running a full project, you can test the MCP integration:
+Test the MCP integration:
 
 ```bash
 python tests/test_mcp.py
 ```
 
-This will:
-1. Create a test database
-2. Test basic MCP tools (status, create epic, expand epic)
-3. Verify the MCP server is working correctly
+This verifies the MCP server is working correctly with the database.
 
-## Why MCP?
+---
 
-### Advantages of Protocol-Based Tools
-
-```python
-# Agent uses MCP tools
-mcp__task-manager__task_status
-mcp__task-manager__get_next_task
-mcp__task-manager__update_task_status(task_id=5, done=True)
-```
-
-**Benefits:**
-- **Structured, type-safe interface** - Proper parameter validation
-- **Better error handling** - Detailed error messages with context
-- **No shell escaping issues** - JSON-based communication
-- **Easier to extend** - Add new tools without shell script complexity
-- **Foundation for real-time updates** - Could support subscriptions in future
-- **Auto-initialization** - Database created before MCP server starts
-
-## MCP Tools Available
+## Available Tools
 
 All tools are prefixed with `mcp__task-manager__`:
 
-### Query Tools
-- `task_status` - Get overall project progress
-- `get_next_task` - Get next task to work on
-- `list_epics` - List all epics
-- `get_epic` - Get epic details with tasks
-- `list_tasks` - List tasks with filtering
-- `get_task` - Get task details including tests
-- `list_tests` - Get tests for a task
-- `get_session_history` - View recent sessions
+### Query Tools (Read)
+- `task_status` - Overall project progress
+- `get_next_task` - Next task to work on
+- `list_epics` - All epics
+- `get_epic` - Epic details with tasks
+- `list_tasks` - Tasks with filtering
+- `get_task` - Task details including tests
+- `list_tests` - Tests for a task
+- `get_session_history` - Recent sessions
 
-### Update Tools
-- `update_task_status` - Mark task done/not done
+### Update Tools (Write)
+- `update_task_status` - Mark task complete/incomplete
 - `start_task` - Mark task as started
 - `update_test_result` - Mark test pass/fail
 
@@ -91,8 +54,30 @@ All tools are prefixed with `mcp__task-manager__`:
 - `create_epic` - Create new epic
 - `create_task` - Create task in epic
 - `create_test` - Add test to task
-- `expand_epic` - Break epic into multiple tasks
+- `expand_epic` - Break epic into tasks
 - `log_session` - Log session completion
+
+**See [mcp-task-manager/README.md](../mcp-task-manager/README.md#features) for detailed tool documentation**
+
+---
+
+## Why MCP?
+
+**MCP (Model Context Protocol) provides:**
+- ✅ Structured, type-safe interface
+- ✅ Proper parameter validation
+- ✅ Better error handling
+- ✅ No shell escaping issues
+- ✅ Easier to extend
+- ✅ JSON-based communication
+
+**vs. Shell scripts:**
+- ❌ String parsing fragile
+- ❌ Hard to validate inputs
+- ❌ Escaping/quoting issues
+- ❌ No type safety
+
+---
 
 ## Architecture
 
@@ -115,66 +100,124 @@ All tools are prefixed with `mcp__task-manager__`:
                     └─────────────────────┘
 ```
 
+**Key Points:**
+- **MCP Server** runs as a subprocess of the agent
+- **PostgreSQL** stores all task data centrally
+- **Project Scoping** via `PROJECT_ID` environment variable
+- **Connection Pooling** for efficient database access
+
+---
+
 ## Database Connection
 
-The task database is centralized in PostgreSQL:
-- Connection via `DATABASE_URL` environment variable
-- Project-specific queries use `PROJECT_ID` parameter
-- Shared database for all projects with UUID-based isolation
+The MCP server connects to PostgreSQL automatically:
+
+**Environment Variables:**
+```bash
+DATABASE_URL="postgresql://user:pass@localhost:5432/yokeflow"
+PROJECT_ID="550e8400-e29b-41d4-a716-446655440000"
+```
+
+These are automatically set by `orchestrator.py` when sessions start.
+
+**Database Schema:**
+- `projects` - Project metadata
+- `epics` - High-level feature areas (15-25 per project)
+- `tasks` - Specific work items (8-15 per epic)
+- `tests` - Test cases (1-3 per task)
+- `sessions` - Session history and metrics
+
+**See [schema/postgresql/](../schema/postgresql/) for complete schema**
+
+---
 
 ## Troubleshooting
 
 ### MCP Server Not Found
-If you get "MCP server not found" errors:
-1. Ensure the MCP server is built: `cd mcp-task-manager && npm run build`
-2. Check that `dist/index.js` exists
-3. Verify the path in `client.py` is correct
 
-### Database Connection Issues
-If database connection fails:
-1. Ensure PostgreSQL is running: `docker-compose up -d`
-2. Check `DATABASE_URL` in `.env` file
-3. Initialize database: `python scripts/init_database.py`
-4. Verify connection: `psql $DATABASE_URL -c "SELECT version();"`
+**Error:** `MCP server not found` or `dist/index.js missing`
 
-### Project Not Found
-If project is not found:
-1. Verify project exists in database: `psql $DATABASE_URL -c "SELECT * FROM projects;"`
-2. Check that `PROJECT_ID` is being passed to MCP server
-3. Ensure project was created via `orchestrator.create_project()`
+**Solution:**
+```bash
+cd mcp-task-manager
+npm install
+npm run build
+```
 
-## Development
+### Database Connection Failed
 
-To modify the MCP server:
+**Error:** `Connection refused` or `database "yokeflow" does not exist`
 
-1. Edit the TypeScript source:
-   ```bash
-   cd mcp-task-manager
-   npm install
-   # Edit src/*.ts files
-   npm run build
-   ```
+**Solution:**
+```bash
+# Start PostgreSQL
+docker-compose up -d
 
-2. Test your changes:
-   ```bash
-   python tests/test_mcp.py
-   ```
+# Initialize database
+python scripts/init_database.py
 
-3. Run with the agent:
-   ```bash
-   python autonomous_agent.py --project-dir test_project --max-iterations 1
-   ```
+# Verify connection
+psql $DATABASE_URL -c "SELECT version();"
+```
 
-## Future Enhancements
+### Tools Not Available
 
-Planned improvements for MCP mode:
-- WebSocket support for real-time UI updates
-- Task dependencies and relationships
-- Time tracking and estimates
-- Multi-agent collaboration
-- Web dashboard integration
-- Skills system for complex operations
+**Error:** Agent doesn't see `mcp__task-manager__*` tools
+
+**Solution:**
+1. Check MCP server is built (`ls mcp-task-manager/dist/index.js`)
+2. Verify PostgreSQL is running (`docker ps | grep postgres`)
+3. Check `DATABASE_URL` in `.env` file
+4. Restart the session
+
+---
+
+## For Developers
+
+### Building the MCP Server
+
+```bash
+cd mcp-task-manager
+npm install       # Install dependencies
+npm run build     # Compile TypeScript → JavaScript
+npm run watch     # Auto-rebuild on changes
+```
+
+### Adding New Tools
+
+1. Edit `mcp-task-manager/src/index.ts`
+2. Add tool to `server.setRequestHandler(ListToolsRequestSchema, ...)`
+3. Implement handler in `server.setRequestHandler(CallToolRequestSchema, ...)`
+4. Rebuild: `npm run build`
+
+**See [mcp-task-manager/README.md#development](../mcp-task-manager/README.md#development) for detailed development guide**
+
+### Testing Changes
+
+```bash
+# Test MCP server directly
+npm test
+
+# Test via agent
+python tests/test_mcp.py
+```
+
+---
+
+## Related Documentation
+
+- **[mcp-task-manager/README.md](../mcp-task-manager/README.md)** - Complete MCP server documentation
+- **[developer-guide.md](developer-guide.md)** - Platform architecture and development
+- **[configuration.md](configuration.md)** - Configuration options
+- **[docker-sandbox-implementation.md](docker-sandbox-implementation.md)** - Docker integration (includes `bash_docker` MCP tool)
+
+---
 
 ## Historical Note
 
-Previously, the system supported both shell-based and MCP-based task management. Shell mode has been removed in favor of the superior MCP protocol. All projects now use MCP exclusively.
+**MCP replaced shell scripts (December 2025):**
+- Old: `task-helper.sh` with JSONL file storage
+- New: MCP server with PostgreSQL database
+- Migration: Automatic via database schema
+
+All new development uses MCP. Shell-based task management has been removed.

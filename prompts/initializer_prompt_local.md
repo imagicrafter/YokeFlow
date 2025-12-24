@@ -25,104 +25,10 @@ Bash({ command: "(cd server && npm run migrate)" })
 
 ---
 
-## 🔧 SERVER LIFECYCLE MANAGEMENT (LOCAL MODE)
-
-**CRITICAL - Keep Servers Running Between Sessions**
-
-**Why Local Mode is Different:**
-- No port forwarding issues (direct host access)
-- The Web UI (port 3000) should stay running for monitoring
-- Generated app servers can persist across sessions
-- **ONLY restart servers when necessary (code changes, errors)**
-
-### At START of Session
-
-**Use health checks instead of killing servers:**
-
-```bash
-# Check if servers are already running
-curl -s http://localhost:3001/health && echo "✅ Backend running" || echo "❌ Backend down"
-curl -s http://localhost:5173 > /dev/null 2>&1 && echo "✅ Frontend running" || echo "❌ Frontend down"
-
-# ONLY start if needed
-if ! curl -s http://localhost:5173 > /dev/null 2>&1; then
-  echo "Starting servers..."
-  chmod +x init.sh && ./init.sh
-  sleep 3
-fi
-```
-
-**❌ DO NOT use aggressive pkill commands:**
-```bash
-# ❌ WRONG - Kills Web UI on port 3000!
-pkill -f 'node.*index.js' || true
-
-# ❌ WRONG - Kills all dev servers including monitoring UI!
-pkill -f 'vite|npm run dev' || true
-```
-
-### During Session - Targeted Restarts Only
-
-**If you modify backend code and need to restart:**
-
-```bash
-# Kill ONLY the generated app's backend (be specific!)
-lsof -ti:3001 | xargs kill -9 2>/dev/null || true
-sleep 1
-
-# Restart backend
-(cd server && node index.js > ../server.log 2>&1 &)
-sleep 3
-
-# Verify
-curl -s http://localhost:3001/health && echo "✅ Backend restarted"
-```
-
-**If frontend has errors and needs restart:**
-
-```bash
-# Kill ONLY the generated app's frontend (be specific!)
-lsof -ti:5173 | xargs kill -9 2>/dev/null || true
-sleep 1
-
-# Restart frontend
-(cd client && npm run dev > ../client.log 2>&1 &)
-sleep 3
-
-# Verify
-curl -s http://localhost:5173 && echo "✅ Frontend restarted"
-```
-
-**Frontend (Vite) typically auto-reloads - no manual restart needed.**
-
-### At END of Session
-
-**Local mode: Keep servers running for next session**
-
-```bash
-# Just verify status (don't kill!)
-git status
-curl -s http://localhost:3001/health && echo "✅ Backend still running"
-curl -s http://localhost:5173 > /dev/null 2>&1 && echo "✅ Frontend still running"
-```
-
-**ONLY stop servers if:**
-- Session encountered critical errors
-- You're explicitly asked to stop servers
-- Project is complete and deployment-ready
-
-**Why keep servers running:**
-- Faster session startup (no wait for server initialization)
-- Web UI stays accessible for monitoring
-- Better user experience
-- Servers restart automatically if code changes (via Vite HMR)
-
----
-
 # Initializer Agent Prompt (v4 - MCP with Batching Efficiency)
 
 **Version History:**
-- v4 (Dec 12, 2024): Added batching guidance for epic and test creation (30-40% faster initialization)
+- v4 (Dec 12, 2025): Added batching guidance for epic and test creation (30-40% faster initialization)
 - v3: MCP-Based Hierarchical Approach
 - v2: Task expansion improvements
 - v1: Initial version
@@ -142,14 +48,46 @@ Your job is to set up the foundation for all future coding agents.
 
 ## FIRST: Read the Project Specification
 
-**IMPORTANT**: First run `pwd` to see your current working directory, then read
-`app_spec.txt` from that directory. DO NOT use any hardcoded or remembered paths.
+**IMPORTANT**: First run `pwd` to see your current working directory.
 
-The file `app_spec.txt` is in your current working directory and contains the complete
-specification for what you need to build. Read it carefully before proceeding.
+The specification may be in one of two locations:
+
+### Option 1: Single File (app_spec.txt)
+If you see `app_spec.txt` in your working directory and it contains the full specification,
+read it and proceed.
+
+### Option 2: Multiple Files (spec/ directory)
+If `app_spec.txt` mentions a `spec/` directory, you have multiple specification files:
+
+1. **Read app_spec.txt first** - It will tell you which file is primary
+2. **Read the primary file** (usually `main.md` or `spec.md`)
+3. **Lazy-load additional files** - Only read them when you need specific details
+4. **Search when needed** - Use `grep -r "search term" spec/` to find information
+
+**Example workflow:**
+```bash
+# Check what's available
+cat app_spec.txt
+
+# If it says "primary file: spec/main.md"
+cat spec/main.md
+
+# If main.md references "see api-design.md for endpoints"
+# Read it only when implementing the API:
+cat spec/api-design.md
+
+# Search across all specs if needed
+grep -r "authentication" spec/
+```
+
+**Context Management (Important!):**
+- ❌ Don't read all spec files upfront (wastes tokens)
+- ✅ Follow references in the primary file
+- ✅ Read additional files only when needed for your current task
+- ✅ Use grep to search across files when looking for specific information
 
 **This is critical** - all epics, tasks, and the project structure must be
-derived from what's in app_spec.txt in YOUR CURRENT WORKING DIRECTORY.
+derived from the specification in YOUR CURRENT WORKING DIRECTORY.
 
 ---
 

@@ -16,7 +16,7 @@ from pathlib import Path
 project_root = Path(__file__).parent.parent
 sys.path.insert(0, str(project_root))
 
-from security import (
+from core.security import (
     bash_security_hook,
     extract_commands,
     validate_chmod_command

@@ -22,6 +22,9 @@ interface CurrentSessionProps {
   assistantMessages?: string[];
   // Project initialization status
   isInitialized?: boolean;
+  // Loading states for session startup
+  isInitializing?: boolean;
+  isStartingCoding?: boolean;
 }
 
 export function CurrentSession({
@@ -36,11 +39,33 @@ export function CurrentSession({
   maxIterations = null,
   toolCount = null,
   assistantMessages = [],
-  isInitialized = false
+  isInitialized = false,
+  isInitializing = false,
+  isStartingCoding = false
 }: CurrentSessionProps) {
   const [activeTab, setActiveTab] = useState<'overview' | 'activity' | 'details'>('overview');
 
   if (!session && !nextTask) {
+    // Show loading state when starting a session
+    if (isInitializing || isStartingCoding) {
+      return (
+        <div className="text-center py-12">
+          <div className="flex flex-col items-center gap-4">
+            <div className="w-12 h-12 border-4 border-blue-500 border-t-transparent rounded-full animate-spin"></div>
+            <div className="space-y-2">
+              <p className="text-gray-300 font-medium">
+                {isInitializing ? 'Starting Initializer...' : 'Starting Coding Session...'}
+              </p>
+              <p className="text-sm text-gray-500">
+                This may take up to 60 seconds while the agent session starts
+              </p>
+            </div>
+          </div>
+        </div>
+      );
+    }
+
+    // Default "no session" state
     return (
       <div className="text-center py-12 text-gray-500">
         <p>No active session</p>
@@ -221,7 +246,8 @@ export function CurrentSession({
                           Stop After Current
                         </button>
                       )}
-                      {onStopSession && (
+                      {/* Only show "Stop Now" for coding sessions */}
+                      {onStopSession && (session.type === 'coding' || session.session_type === 'coding') && (
                         <button
                           onClick={onStopSession}
                           className="px-4 py-2 bg-red-600 hover:bg-red-700 text-white rounded-lg transition-colors text-sm font-medium"
