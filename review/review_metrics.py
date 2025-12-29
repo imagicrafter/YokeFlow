@@ -37,6 +37,10 @@ def analyze_session_logs(jsonl_path: Path) -> Dict[str, Any]:
     - Browser verification metrics (Playwright)
     - Session timing
 
+    Detects browser verification in both:
+    1. Direct MCP Playwright server usage (mcp__playwright__ tools)
+    2. Docker sandbox Playwright usage (bash_docker commands running Playwright/tests)
+
     Args:
         jsonl_path: Path to session JSONL log file
 
@@ -86,8 +90,50 @@ def analyze_session_logs(jsonl_path: Path) -> Dict[str, Any]:
                         total_tool_uses += 1
 
                         # Track Playwright usage specifically
+                        # 1. Direct MCP Playwright server usage (non-Docker)
                         if tool_name.startswith('mcp__playwright__'):
                             playwright_tools.append(tool_name)
+
+                        # 2. Docker sandbox Playwright usage via bash_docker
+                        elif tool_name == 'mcp__task-manager__bash_docker':
+                            # Check if this is a Playwright command
+                            params = event.get('params', {})
+                            command = params.get('command', '')
+
+                            # Common Playwright commands in Docker
+                            command_lower = command.lower()
+
+                            # Check for various Playwright/browser testing patterns
+                            is_playwright = False
+                            indicator_found = ''
+
+                            # Check screenshot FIRST (highest priority for tracking)
+                            if 'screenshot' in command_lower:
+                                is_playwright = True
+                                indicator_found = 'screenshot'  # This will make it detectable for screenshot count
+                            # Direct Playwright commands
+                            elif 'playwright' in command_lower or 'pw ' in command_lower:
+                                is_playwright = True
+                                indicator_found = 'playwright'
+                            # npm/npx test commands (often run Playwright tests)
+                            elif any(cmd in command_lower for cmd in ['npm run test', 'npm test', 'npx test']):
+                                is_playwright = True
+                                indicator_found = 'test'
+                            # Browser test files
+                            elif 'test' in command_lower and ('browser' in command_lower or '.spec.' in command_lower):
+                                is_playwright = True
+                                indicator_found = 'browser_test'
+                            # Browser verification scripts
+                            elif 'verify' in command_lower and 'browser' in command_lower:
+                                is_playwright = True
+                                indicator_found = 'browser_verify'
+                            # Common test file patterns
+                            elif any(pattern in command_lower for pattern in ['.test.', '.spec.', 'e2e', 'integration']):
+                                is_playwright = True
+                                indicator_found = 'test_file'
+
+                            if is_playwright:
+                                playwright_tools.append(f"bash_docker_{indicator_found}")
 
                 # Count errors
                 if event.get('event') == 'tool_result' and event.get('is_error'):
@@ -105,8 +151,10 @@ def analyze_session_logs(jsonl_path: Path) -> Dict[str, Any]:
     error_rate = error_count / total_tool_uses if total_tool_uses > 0 else 0
 
     playwright_count = len(playwright_tools)
-    playwright_screenshot_count = sum(1 for t in playwright_tools if 'screenshot' in t)
-    playwright_navigate_count = sum(1 for t in playwright_tools if 'navigate' in t)
+    # Count screenshots from both MCP and Docker commands
+    playwright_screenshot_count = sum(1 for t in playwright_tools if 'screenshot' in t.lower())
+    # Count navigation from both MCP and Docker commands
+    playwright_navigate_count = sum(1 for t in playwright_tools if 'navigate' in t.lower() or 'browser' in t.lower())
 
     return {
         'tool_counts': tool_counts,
