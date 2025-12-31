@@ -264,6 +264,48 @@ cd yokeflow
 
 ### Phase 3: Configure Environment
 
+#### 3.1: Create YokeFlow Configuration
+
+```bash
+# Create YokeFlow configuration file
+cat > .yokeflow.yaml << 'EOF'
+# YokeFlow Configuration - Production Deployment
+
+models:
+  initializer: claude-opus-4-5-20251101
+  coding: claude-sonnet-4-5-20250929
+
+timing:
+  auto_continue_delay: 3
+  web_ui_poll_interval: 5
+
+sandbox:
+  type: docker
+  docker_image: yokeflow-playwright:latest
+  docker_network: bridge
+  docker_memory_limit: 3g
+  docker_cpu_limit: 2.0
+  docker_ports: []
+
+project:
+  default_generations_dir: /var/YokeFlow/generations  # CRITICAL: Must be host path (where you cloned repo)
+  max_iterations: null
+
+review:
+  min_reviews_for_analysis: 5
+EOF
+```
+
+**IMPORTANT - Generations Directory Path:**
+- The `default_generations_dir` must be the **host filesystem path** (not container path)
+- This is the directory where you cloned the YokeFlow repository
+- The GitHub repository is named `YokeFlow` (capital Y, F), so `git clone` creates `/var/YokeFlow/`
+- Use the exact path: `/var/YokeFlow/generations` (match the capitalization from git clone)
+- Both API and agent containers will mount this host path correctly via Docker volumes
+- **Do NOT use `/app/generations`** - that's the container internal path, not the host path
+
+#### 3.2: Configure Environment Variables
+
 ```bash
 # Create production environment file
 cp .env.example .env
@@ -1799,7 +1841,91 @@ docker images | grep yokeflow-playwright
 
 ---
 
-#### 0c. Playwright Browser Not Found in Agent Container
+#### 0c. Volume Mount Issue - Files Not Syncing to Container
+
+**Symptom:**
+```
+Agent reports:
+"The workspace is a separate disk mount"
+"The /workspace directory exists in the container but is empty"
+"The volume mount isn't connecting to the host files"
+
+Files exist on host at: /var/yokeflow/generations/project-name/
+Container shows empty: /workspace/
+
+Screenshots are never created in .playwright-mcp/ directory
+```
+
+**Cause:** The `.yokeflow.yaml` file uses a **container path** (`/app/generations`) instead of the **host filesystem path** (`/var/YokeFlow/generations`). This causes agent containers to mount from the wrong location, splitting files across two directories.
+
+**How it happens:**
+1. YokeFlow cloned to `/var/YokeFlow/` (capital Y, F - from GitHub repo name)
+2. Config has `default_generations_dir: /app/generations` (container path - WRONG!)
+3. Orchestrator (in API container) creates project at `/app/generations/claude_ai/`
+4. API's volume mount (`/var/YokeFlow/generations:/app/generations`) makes this accessible to API
+5. But sandbox_manager passes `/app/generations/claude_ai` to Docker for agent container mount
+6. Docker interprets this as a **host path** (not understanding it's a container path)
+7. Since `/app/generations/claude_ai` doesn't exist on host, Docker creates it as a new directory
+8. Result: Files split between `/var/YokeFlow/generations/` (from API) and `/app/generations/` (from agents)
+
+**Solution:**
+
+```bash
+# 1. Stop any running sessions
+cd /var/yokeflow
+docker compose -f docker-compose.prod.yml down
+
+# 2. Edit .yokeflow.yaml
+vim .yokeflow.yaml
+
+# 3. Change the generations directory to use the host path:
+# FROM:
+#   default_generations_dir: /app/generations
+# TO:
+#   default_generations_dir: /var/YokeFlow/generations
+#
+# IMPORTANT: Use the exact path where you cloned YokeFlow (capital Y, F)
+# The GitHub repo name is "YokeFlow" so git clone creates /var/YokeFlow/
+
+# 4. Clean up the wrong directory on host (if it exists)
+sudo rm -rf /app/generations
+
+# 5. Verify the change
+grep default_generations_dir .yokeflow.yaml
+# Should show: default_generations_dir: /var/YokeFlow/generations
+
+# 6. Restart services
+docker compose -f docker-compose.prod.yml up -d
+
+# 7. Delete any partially initialized projects and re-create them
+# Files were split across two locations, need fresh start
+```
+
+**Verification:**
+
+```bash
+# After changing config and restarting, initialize a test project
+# Then check if files sync:
+
+# On host (where you installed YokeFlow)
+ls -la /var/YokeFlow/generations/your-project/
+
+# In API container (should see files via volume mount)
+docker exec yokeflow_api ls -la /app/generations/your-project/
+
+# In agent container (while session is running, should see files via mount)
+docker exec yokeflow-your-project ls -la /workspace/
+
+# All three should show identical files!
+```
+
+**Prevention:** Always use the **host filesystem path** in `.yokeflow.yaml` for production deployments, not container paths. The path should match where you cloned the repository (e.g., `/var/YokeFlow/generations` if you cloned to `/var/YokeFlow/`). Follow Phase 3.1 configuration instructions carefully.
+
+**Why this matters:** When orchestrator creates agent containers, it passes the `project_dir` path to Docker for mounting. Docker interprets this as a host path. If you use a container path like `/app/generations`, Docker will try to mount from `/app/generations` on the **host** (which doesn't exist or is wrong), not from inside the API container.
+
+---
+
+#### 0d. Playwright Browser Not Found in Agent Container
 
 **Symptom:**
 ```
@@ -2399,5 +2525,3 @@ For issues with:
 
 ---
 
-**Last Updated:** December 18, 2025
-**Maintainer:** Autonomous Coding Agent Team
