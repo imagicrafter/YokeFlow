@@ -4,11 +4,12 @@
 
 ## ⚠️ MOST IMPORTANT RULES (Read First!)
 
-**1. ALWAYS use Write tool for file creation (most reliable):**
-- ✅ **Write tool** → Best practice for all file creation
-- ⚠️ `cat > file.js << 'EOF'` → Now supported (auto-converted to base64) but Write is cleaner
-- ❌ `echo "content" > file.js` → Still fails (quote/newline escaping issues)
-- ❌ Other workarounds → Generally unreliable
+**1. ALWAYS use Write tool for file creation (MANDATORY):**
+- ✅ **Write tool** → ONLY reliable method for creating files
+- ❌ `cat > file.js << 'EOF'` → DOES NOT WORK (heredoc escaping fails)
+- ❌ `echo "content" > file.js` → DOES NOT WORK (quote/newline escaping issues)
+- ❌ Base64, printf, python → ALL workarounds are unreliable or fail
+- **Rule: If creating a file, use Write tool. No exceptions.**
 
 **2. File extensions matter (package.json has "type": "module"):**
 - ✅ Use `.cjs` extension for CommonJS files (require/module.exports)
@@ -178,10 +179,10 @@ Edit({
 - ✅ Executes inside container at `/workspace`
 
 **🚫 NEVER use bash_docker for file creation:**
-- ⚠️ AVOID: `cat > file.js << 'EOF'` (now works but Write tool is cleaner)
+- ❌ DO NOT use: `cat > file.js << 'EOF'` (heredocs FAIL with escaping errors)
 - ❌ DO NOT use: `echo "content" > file.js` (escaping nightmares)
-- ❌ DO NOT use: base64 encoding, python scripts, or other workarounds
-- ✅ ALWAYS use Write tool for creating files with multi-line content
+- ❌ DO NOT use: base64 encoding, printf, python scripts, or other workarounds
+- ✅ ALWAYS use Write tool for ALL file creation (only reliable method)
 
 **NPM Commands - Platform Awareness:**
 ```bash
@@ -278,17 +279,18 @@ bash_docker({ command: "for i in {1..15}; do curl -s http://localhost:5173 > /de
 ### Mistake 1: Creating files with bash commands instead of Write tool
 
 ```bash
-# ⚠️ NOW WORKS but NOT RECOMMENDED - Heredocs are automatically converted
+# ❌ WRONG - Heredocs DO NOT WORK in bash_docker (escaping issues)
 bash_docker({
   command: "cat > test.js << 'EOF'\nconst test = 'hello';\nEOF"
 })
-# This now works (converted to base64 internally) but Write tool is better
+# Error: "base64: extra operand" or "syntax error near unexpected token"
+# Despite what old documentation said, heredocs are NOT supported
 
-# ⚠️ TECHNICALLY WORKS but use Write instead
-bash_docker({
-  command: "cat > /tmp/verify.js << 'EOF'\nconst { chromium } = require('playwright');\n..."
-})
-# Heredocs are now supported via automatic base64 conversion
+# ❌ WRONG - Echo with redirection has escaping nightmares
+bash_docker({ command: "echo 'content' > file.js" })
+
+# ❌ WRONG - Multi-line echo fails with newlines and quotes
+bash_docker({ command: "echo 'const x = \"test\";\nconsole.log(x);' > file.js" })
 ```
 
 ```javascript
@@ -309,23 +311,38 @@ Write({
 bash_docker({ command: "node verify_task_123.cjs" })  // Then run it
 ```
 
-### Mistake 2: Trying workarounds (they all fail!)
+**Why Write tool is mandatory for files:**
+- ✅ No escaping issues with quotes, newlines, or special characters
+- ✅ Volume mount syncs instantly to container (< 1ms)
+- ✅ Works with any file content (binary, multi-line, complex strings)
+- ✅ Readable, maintainable code
+
+### Mistake 2: Trying bash workarounds (they all fail!)
 
 ```bash
-# ❌ WRONG - Base64 encoding still fails
-bash_docker({ command: "echo 'content' | base64 -d > file.js" })
+# ❌ WRONG - Heredocs FAIL (documented above)
+bash_docker({ command: "cat > file.js << 'EOF'\n...\nEOF" })
 
-# ❌ WRONG - Python script has same escaping issues
+# ❌ WRONG - Base64 encoding FAILS (command format issues)
+bash_docker({ command: "echo 'Y29udGVudA==' | base64 -d > file.js" })
+
+# ❌ WRONG - Python heredoc FAILS (same issues)
 bash_docker({ command: "python3 << 'END'\nwith open('f.js','w') as f: ...\nEND" })
 
-# ❌ WRONG - Multi-layer scripts just multiply the problems
-bash_docker({ command: "cat > script.sh << 'EOF'\ncat > file.js...\nEOF" })
+# ❌ WRONG - Nested heredocs make it worse
+bash_docker({ command: "cat > script.sh << 'EOF'\ncat > file.js << 'END'\n...\nEND\nEOF" })
+
+# ❌ WRONG - Printf with newlines is fragile and hard to read
+bash_docker({ command: "printf 'line1\\nline2\\n' > file.js" })
 ```
 
 ```javascript
 // ✅ CORRECT - Just use Write tool!
 Write({ file_path: "server/index.js", content: "..." })
+// No escaping. No heredocs. No workarounds. Just works.
 ```
+
+**If you find yourself trying bash tricks to create files, STOP and use Write tool.**
 
 ### Mistake 3: Using wrong file extension with "type": "module"
 
