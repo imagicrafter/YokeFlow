@@ -732,10 +732,15 @@ Build the agent sandbox image (with Playwright):
 ```bash
 # Build custom agent sandbox image with Playwright pre-installed
 # This image is used by agent sessions for browser testing
-docker build -f Dockerfile.agent-sandbox -t yokeflow-sandbox:latest .
+docker build -f Dockerfile.agent-sandbox -t yokeflow-playwright:latest .
 
 # This build takes 3-5 minutes and ~2GB disk space
 # But it only needs to be done once (or when updating)
+
+# Note: If you have a .yokeflow.yaml file in your project root,
+# it should reference this image name:
+# sandbox:
+#   docker_image: yokeflow-playwright:latest
 ```
 
 Start production services:
@@ -1748,7 +1753,44 @@ docker compose -f docker-compose.prod.yml logs -f api
 
 ---
 
-#### 0b. Playwright Browser Not Found in Agent Container
+#### 0b. Docker Image Not Found - yokeflow-playwright
+
+**Symptom:**
+```
+Failed to start Docker sandbox: 404 Client Error for http+docker://localhost/v1.51/images/create?tag=latest&fromImage=yokeflow-playwright: Not Found ("pull access denied for yokeflow-playwright, repository does not exist or may require 'docker login': denied: requested access to the resource is denied")
+```
+
+**Cause:** The `yokeflow-playwright:latest` Docker image has not been built on the server. This image is required for browser testing with Playwright.
+
+**Solution:**
+
+```bash
+# Build the Playwright-enabled agent sandbox image
+cd /var/yokeflow
+docker build -f Dockerfile.agent-sandbox -t yokeflow-playwright:latest .
+
+# This build takes 3-5 minutes and installs:
+# - Node.js 20 LTS
+# - Playwright and Chromium browser
+# - All browser dependencies (~80 system packages)
+# - Git, build tools, Python
+
+# Verify image was built successfully
+docker images | grep yokeflow-playwright
+
+# Expected output:
+# yokeflow-playwright   latest   abc123def456   2 minutes ago   2.1GB
+
+# Now try initializing your project again - it should work
+```
+
+**Prevention:** Always build the agent sandbox image during Phase 7 of deployment, BEFORE trying to create any projects.
+
+**Note:** This image is only built locally on your server. It is NOT pulled from Docker Hub or any public registry. You must build it yourself using the Dockerfile created in Phase 7.
+
+---
+
+#### 0c. Playwright Browser Not Found in Agent Container
 
 **Symptom:**
 ```
@@ -1763,7 +1805,7 @@ Run "npx playwright install chrome"
 ```bash
 # 1. Build custom agent sandbox image (one-time, 3-5 minutes)
 cd /var/yokeflow
-docker build -f Dockerfile.agent-sandbox -t yokeflow-sandbox:latest .
+docker build -f Dockerfile.agent-sandbox -t yokeflow-playwright:latest .
 
 # This installs:
 # - Playwright browsers (Chrome, Chromium)
@@ -1771,10 +1813,12 @@ docker build -f Dockerfile.agent-sandbox -t yokeflow-sandbox:latest .
 # - Git, build tools
 
 # 2. Verify image built
-docker images | grep yokeflow-sandbox
+docker images | grep yokeflow
+
+# Expected output: yokeflow-playwright   latest   ...
 
 # 3. Next agent session will use new image automatically
-# (config.py defaults to yokeflow-sandbox:latest)
+# (.yokeflow.yaml should specify: docker_image: yokeflow-playwright:latest)
 ```
 
 **Prevention:** Always build agent sandbox image during initial deployment (Phase 7, before starting services)
