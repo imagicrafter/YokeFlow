@@ -166,7 +166,7 @@ def spec_to_xml(spec: Dict[str, Any]) -> str:
     """
     Convert a SpecOutput dictionary to XML format.
 
-    Matches the format in generations/opti-route/app_spec.txt:
+    Matches YokeFlow's app_spec.txt format:
     - 2-space indentation
     - Proper XML escaping
     - All sections in order
@@ -252,11 +252,14 @@ def spec_to_xml(spec: Dict[str, Any]) -> str:
 # ============================================================================
 
 SPEC_GENERATION_PROMPT = """
-# YokeFlow Project Specification Generator
+# Project Specification Generator
 
-You are creating a project specification for YokeFlow, an autonomous AI coding platform.
-The specification you generate will be used by an AI agent to build a complete,
-production-ready application autonomously over multiple coding sessions.
+You are creating a project specification that will be used by an autonomous AI coding agent.
+The agent will use this specification to build a complete, production-ready application
+autonomously over multiple coding sessions.
+
+IMPORTANT: The project name should reflect the USER'S application, not the tool generating it.
+Do NOT prefix the project name with "yokeflow" or any tool-related names.
 
 ## User's Project Description
 
