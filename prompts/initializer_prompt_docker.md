@@ -461,51 +461,96 @@ tasks: [
 
 **After expanding each epic, add tests for the tasks:**
 
+**CRITICAL: Categorize tasks to determine appropriate test type!**
+
+**Task Type Detection (examine task title/description):**
+- **UI Tasks**: Contains "UI", "component", "page", "form", "button", "display", "layout", "style", "view"
+- **API Tasks**: Contains "API", "endpoint", "route", "middleware", "server", "REST", "GraphQL", "webhook"
+- **Config Tasks**: Contains "config", "setup", "TypeScript", "build", "package", "dependencies", "tooling"
+- **Database Tasks**: Contains "database", "schema", "table", "migration", "model", "query", "ORM"
+- **Integration Tasks**: Contains "workflow", "end-to-end", "user journey", "full stack", "complete flow"
+
 **EFFICIENCY TIP:** Batch test creation for all tasks within an epic rather than creating tests one-by-one.
 
 **Recommended approach:**
 1. **Expand epic** - Get all task IDs back from `expand_epic` response
-2. **Plan all tests** - Review the tasks and draft test descriptions for each
-3. **Batch create tests** - Make sequential `create_test` calls for all tasks in the epic
-4. **Continue to next epic** - Don't check status between each test, verify once per epic
+2. **Categorize each task** - Determine if it's UI, API, Config, Database, or Integration
+3. **Plan appropriate tests** - Create test descriptions matching the task type
+4. **Batch create tests** - Make sequential `create_test` calls with proper verification type
+5. **Continue to next epic** - Don't check status between each test, verify once per epic
 
-**Example batched test creation (for Epic 1 tasks):**
+**Example batched test creation showing different test types:**
 ```
+# Task 1: "Initialize TypeScript configuration" (CONFIG TASK)
 mcp__task-manager__create_test
 task_id: 1
 category: "functional"
-description: "Server starts and responds to health check"
-steps: ["Start the server", "GET /health endpoint", "Verify 200 response", "Verify response body contains status"]
+description: "TypeScript compiles without errors"
+steps: ["Run tsc --noEmit", "Verify no compilation errors", "Check tsconfig.json settings"]
+verification_type: "build"  # No browser needed!
 
-mcp__task-manager__create_test
-task_id: 1
-category: "style"
-description: "Health endpoint returns proper JSON format"
-steps: ["Check Content-Type header", "Verify JSON structure matches spec"]
-
+# Task 2: "Create Fastify server with middleware" (API TASK)
 mcp__task-manager__create_test
 task_id: 2
 category: "functional"
-description: "Database connection successful"
-steps: ["Import db module", "Verify connection pool created", "Test query execution"]
+description: "Server responds to health check"
+steps: ["Start server", "curl http://localhost:3001/health", "Verify 200 status", "Check JSON response"]
+verification_type: "api"  # curl testing, not browser!
 
-... (continue for all tasks in the epic)
+# Task 3: "Build login form component" (UI TASK)
+mcp__task-manager__create_test
+task_id: 3
+category: "functional"
+description: "Login form displays and accepts input"
+steps: ["Navigate to /login", "Check form fields visible", "Enter credentials", "Submit form", "Verify navigation to dashboard"]
+verification_type: "browser"  # Requires Playwright!
+
+# Task 4: "Create users database table" (DATABASE TASK)
+mcp__task-manager__create_test
+task_id: 4
+category: "functional"
+description: "Users table created with correct schema"
+steps: ["Run migration", "Query table structure", "Verify columns and types", "Test insert/select"]
+verification_type: "database"  # SQL queries, not browser!
+
+# Task 5: "Implement complete authentication flow" (INTEGRATION TASK)
+mcp__task-manager__create_test
+task_id: 5
+category: "functional"
+description: "User can register, login, and access protected routes"
+steps: ["Register new user", "Login with credentials", "Access dashboard", "Logout", "Verify redirect to login"]
+verification_type: "e2e"  # Full browser workflow!
 ```
 
-**Test categories:**
+**Test categories remain the same:**
 - `functional` - Feature works correctly
-- `style` - Visual appearance, UI/UX
-- `accessibility` - Keyboard nav, screen readers, ARIA
+- `style` - Visual appearance, UI/UX (UI tasks only)
+- `accessibility` - Keyboard nav, screen readers (UI tasks only)
 - `performance` - Speed, efficiency
+
+**Verification types (NEW - helps coding agent choose right test approach):**
+- `browser` - UI components requiring visual verification
+- `api` - Backend endpoints testable with curl/fetch
+- `build` - Configuration/compilation verification
+- `database` - Schema/query testing with SQL
+- `e2e` - Complete user workflows needing full browser testing
 
 **Aim for:**
 - 1-3 tests per task
-- Mix of functional and style tests
+- Appropriate verification type for each task category
 - Specific, verifiable test steps
+- NO browser tests for config/database tasks (wastes time)
+- ALWAYS browser tests for UI tasks (catches visual issues)
+
+**Why task-specific testing matters:**
+- Config/database tasks with browser testing waste 5-10 min per task
+- API tasks verified with curl are 80% faster than browser tests
+- UI tasks NEED browser testing to catch visual/interaction bugs
+- Proper test categorization reduces coding session time by 30-40%
 
 **Why batch test creation:**
 - Much faster than alternating between create_test and status checks
-- Reduces session time by 30-40% (initialization sessions can be 15-20 minutes)
+- Reduces initialization time by 30-40%
 - Database handles bulk inserts efficiently
 - Lets you maintain focus on test planning rather than constant verification
 
@@ -728,8 +773,14 @@ git commit -m "Initialization complete"
 ### Epic/Task Guidelines
 - Every feature in app_spec.txt must become an epic or task
 - Tasks should be specific and implementable in one session
-- Tests should be verifiable through the UI
-- Include both functional and style tests
+- Tests should be verifiable using appropriate methods:
+  - UI tasks: Browser verification with screenshots
+  - API tasks: curl/fetch endpoint testing
+  - Config tasks: Build/compilation checks
+  - Database tasks: SQL query verification
+  - Integration tasks: Full E2E browser workflows
+- Include functional tests for all tasks
+- Include style tests only for UI tasks
 
 ---
 
