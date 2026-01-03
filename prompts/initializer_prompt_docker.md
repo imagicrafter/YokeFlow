@@ -268,6 +268,215 @@ mcp__task-manager__bash_docker({
 
 ---
 
+## 🐳 DOCKER SERVICES CONFIGURATION
+
+**CRITICAL:** When your project needs Docker services (PostgreSQL, Redis, MinIO, etc.), follow these rules to avoid conflicts with YokeFlow's own services.
+
+### ⚠️ Port Conflict Prevention
+
+YokeFlow uses these ports for its own services:
+- **5432** - YokeFlow's PostgreSQL database
+- **8000** - YokeFlow's API server
+- **3000** - YokeFlow's Web UI
+
+**YOUR PROJECT MUST USE DIFFERENT PORTS!**
+
+### 📋 Docker Services Rules
+
+When creating `docker-compose.yml` for your project:
+
+#### 1. Always Use Shifted Ports
+
+```yaml
+version: '3.8'
+
+services:
+  # PostgreSQL - Use 5433 instead of 5432
+  postgres:
+    image: postgres:16-alpine
+    container_name: ${PROJECT_NAME}-postgres  # Unique container name
+    ports:
+      - "5433:5432"  # SHIFTED PORT - Avoids YokeFlow conflict
+    environment:
+      POSTGRES_USER: ${PROJECT_NAME}
+      POSTGRES_PASSWORD: ${PROJECT_NAME}_dev
+      POSTGRES_DB: ${PROJECT_NAME}
+    healthcheck:
+      test: ['CMD-SHELL', 'pg_isready -U ${PROJECT_NAME}']
+      interval: 10s
+      timeout: 5s
+      retries: 5
+
+  # Redis - Use 6380 instead of 6379
+  redis:
+    image: redis:7-alpine
+    container_name: ${PROJECT_NAME}-redis
+    ports:
+      - "6380:6379"  # SHIFTED PORT
+
+  # MinIO - Use 9002/9003 instead of 9000/9001
+  minio:
+    image: minio/minio:latest
+    container_name: ${PROJECT_NAME}-minio
+    command: server /data --console-address ":9001"
+    ports:
+      - "9002:9000"  # SHIFTED PORT for API
+      - "9003:9001"  # SHIFTED PORT for Console
+
+  # Meilisearch - Use 7701 instead of 7700
+  meilisearch:
+    image: getmeili/meilisearch:latest
+    container_name: ${PROJECT_NAME}-meilisearch
+    ports:
+      - "7701:7700"  # SHIFTED PORT
+```
+
+#### 2. Port Allocation Table
+
+Use this port allocation strategy:
+
+| Service | Default Port | YokeFlow Uses | Your Project Should Use |
+|---------|-------------|---------------|------------------------|
+| PostgreSQL | 5432 | ✅ 5432 | 5433, 5434, 5435... |
+| Redis | 6379 | - | 6380, 6381, 6382... |
+| MinIO API | 9000 | - | 9002, 9004, 9006... |
+| MinIO Console | 9001 | - | 9003, 9005, 9007... |
+| Meilisearch | 7700 | - | 7701, 7702, 7703... |
+| Elasticsearch | 9200 | - | 9202, 9204, 9206... |
+
+#### 3. Create Environment Configuration
+
+Create TWO environment files:
+
+**`.env` - For local development (outside container):**
+```bash
+# Database connections for local development
+DATABASE_URL=postgresql://myapp:myapp_dev@localhost:5433/myapp
+REDIS_URL=redis://localhost:6380
+MINIO_ENDPOINT=localhost:9002
+```
+
+**`.env.docker` - For app running in Docker container:**
+```bash
+# Database connections from inside Docker container
+# Uses host.docker.internal to reach services on host
+DATABASE_URL=postgresql://myapp:myapp_dev@host.docker.internal:5433/myapp
+REDIS_URL=redis://host.docker.internal:6380
+MINIO_ENDPOINT=host.docker.internal:9002
+```
+
+#### 4. Update init.sh to Start Services
+
+In your `init.sh`, start Docker services ON THE HOST before any container operations:
+
+```bash
+#!/bin/bash
+set -e
+
+echo "🐳 Starting Docker services on HOST..."
+
+# Check for port conflicts first
+check_port() {
+    if lsof -i :$1 > /dev/null 2>&1; then
+        echo "❌ ERROR: Port $1 is already in use!"
+        lsof -i :$1 | grep LISTEN
+        exit 1
+    fi
+}
+
+# Check shifted ports are available
+check_port 5433  # PostgreSQL
+check_port 6380  # Redis
+check_port 9002  # MinIO API
+check_port 9003  # MinIO Console
+
+# Start services with docker-compose
+if [ -f docker-compose.yml ]; then
+    echo "Starting services with docker-compose..."
+    docker-compose up -d
+
+    echo "Waiting for services to be healthy..."
+    sleep 5
+    docker-compose ps
+
+    # Test PostgreSQL connection (if applicable)
+    if docker ps --format '{{.Names}}' | grep -q postgres; then
+        echo "Testing PostgreSQL connection..."
+        docker exec $(docker ps --filter "name=postgres" -q | head -1) pg_isready || true
+    fi
+fi
+
+echo "✅ Docker services started successfully!"
+
+# Rest of init.sh continues...
+```
+
+#### 5. Application Code Connection Logic
+
+In your application, detect the environment and use appropriate connection strings:
+
+**TypeScript/JavaScript:**
+```typescript
+// config/database.ts
+const isDocker = process.env.DOCKER_ENV === 'true';
+
+export const config = {
+  database: {
+    url: isDocker
+      ? process.env.DATABASE_URL?.replace('localhost', 'host.docker.internal')
+      : process.env.DATABASE_URL
+  },
+  redis: {
+    url: isDocker
+      ? process.env.REDIS_URL?.replace('localhost', 'host.docker.internal')
+      : process.env.REDIS_URL
+  }
+};
+```
+
+**Python:**
+```python
+# config.py
+import os
+
+is_docker = os.environ.get('DOCKER_ENV') == 'true'
+
+DATABASE_URL = os.environ.get('DATABASE_URL')
+if is_docker and DATABASE_URL:
+    DATABASE_URL = DATABASE_URL.replace('localhost', 'host.docker.internal')
+```
+
+### 🚫 What NOT to Do
+
+**NEVER attempt these approaches:**
+
+1. ❌ **Don't use default ports (5432, 6379, etc.)** - Conflicts with YokeFlow
+2. ❌ **Don't try to start Docker inside the container** - Docker-in-Docker issues
+3. ❌ **Don't use --network=host** - Breaks isolation and causes conflicts
+4. ❌ **Don't hardcode localhost in container** - Use host.docker.internal
+
+### ✅ Verification Steps
+
+After creating Docker services configuration:
+
+1. **Verify ports are shifted:**
+   ```bash
+   grep -E "ports:|[0-9]+:[0-9]+" docker-compose.yml
+   # Should show: 5433:5432, 6380:6379, etc.
+   ```
+
+2. **Document the ports in README:**
+   ```markdown
+   ## Docker Services
+
+   This project uses the following services (on shifted ports):
+   - PostgreSQL: localhost:5433
+   - Redis: localhost:6380
+   - MinIO: localhost:9002 (API), localhost:9003 (Console)
+   ```
+
+---
+
 **When you see "bash tool" in instructions below, interpret as `bash_docker` in Docker mode.**
 
 # Initializer Agent Prompt (v4 - MCP with Batching Efficiency)

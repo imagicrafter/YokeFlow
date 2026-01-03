@@ -561,6 +561,78 @@ mcp__task-manager__bash_docker({
 
 ---
 
+## 🐳 DOCKER SERVICES HANDLING
+
+**IMPORTANT:** Your project may have Docker services (PostgreSQL, Redis, MinIO, etc.) running on the HOST with shifted ports.
+
+### Service Connection from Container
+
+When your application needs to connect to Docker services:
+
+1. **Check if docker-compose.yml exists:**
+```bash
+mcp__task-manager__bash_docker({ command: "test -f docker-compose.yml && echo 'Docker services configured' || echo 'No Docker services'" })
+```
+
+2. **Services run on HOST with shifted ports:**
+- PostgreSQL: `host.docker.internal:5433` (NOT localhost:5432)
+- Redis: `host.docker.internal:6380` (NOT localhost:6379)
+- MinIO: `host.docker.internal:9002` (NOT localhost:9000)
+
+3. **Use environment-aware connection strings:**
+```javascript
+// In your application code
+const dbUrl = process.env.DOCKER_ENV === 'true'
+  ? 'postgresql://user:pass@host.docker.internal:5433/db'  // From container
+  : 'postgresql://user:pass@localhost:5433/db';            // From host
+```
+
+### Starting Project Services
+
+**Services should already be running** (started by init.sh during initialization), but verify:
+
+```bash
+# Check if services are running (from container perspective)
+mcp__task-manager__bash_docker({
+  command: "nc -zv host.docker.internal 5433 2>&1 | grep -q succeeded && echo '✅ PostgreSQL accessible' || echo '❌ PostgreSQL not accessible'"
+})
+
+# If services aren't running, they need to be started ON THE HOST
+# This should have been done by init.sh, but if not:
+# Note: You can't start them from inside the container!
+```
+
+### Common Connection Patterns
+
+**PostgreSQL connection test:**
+```bash
+mcp__task-manager__bash_docker({
+  command: "PGPASSWORD=myapp_dev psql -h host.docker.internal -p 5433 -U myapp -d myapp -c 'SELECT 1' && echo '✅ Database connected'"
+})
+```
+
+**Redis connection test:**
+```bash
+mcp__task-manager__bash_docker({
+  command: "redis-cli -h host.docker.internal -p 6380 ping && echo '✅ Redis connected'"
+})
+```
+
+### Troubleshooting Services
+
+If services aren't accessible:
+1. They should have been started by init.sh on the HOST
+2. Check the docker-compose.yml for correct port mappings
+3. Verify using netcat: `nc -zv host.docker.internal PORT`
+4. Services CANNOT be started from inside the container (Docker-in-Docker limitation)
+
+**Remember:**
+- ✅ Connect to `host.docker.internal:SHIFTED_PORT` from container
+- ❌ Never try to start Docker services from inside the container
+- ✅ Services run on HOST with shifted ports to avoid conflicts
+
+---
+
 **When you see "bash tool" in instructions below, interpret as `bash_docker` in Docker mode.**
 
 ---
