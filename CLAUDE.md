@@ -190,6 +190,30 @@ python tests/test_orchestrator.py        # Orchestrator
 - Phase 3: `web-ui/src/components/QualityDashboard.tsx` - UI dashboard ✅ Production Ready
 - Phase 4: `review/prompt_improvement_analyzer.py` - Prompt improvements ✅ **RESTORED** (feature branch)
 
+## Logging & Observability
+
+**Structured Logging** (v1.4.0):
+- **Terminal**: Development-friendly colored output
+- **File**: `logs/yokeflow.log` - JSON format for analysis
+- **Per-Session**: `generations/<project>/logs/session_*.jsonl` - Session details
+
+**Configuration** (via environment variables):
+```bash
+export LOG_LEVEL=INFO          # DEBUG, INFO, WARNING, ERROR, CRITICAL
+export LOG_FORMAT=dev           # 'dev' (colored) or 'json' (production)
+```
+
+**Log Locations**:
+- Application logs: `logs/yokeflow.log` (JSON format)
+- Session logs: `generations/<project>/logs/session_NNN_TIMESTAMP.jsonl`
+- Session summaries: `generations/<project>/logs/session_NNN_TIMESTAMP.txt`
+
+**Features**:
+- Automatic session_id and project_id context injection
+- Performance logging for slow operations
+- Exception tracking with stack traces
+- Ready for ELK/Datadog/CloudWatch integration
+
 ## Production Hardening (January 2026)
 
 **✅ P0 Critical Improvements Complete (v1.3.0)**
