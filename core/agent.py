@@ -19,6 +19,20 @@ from core.progress import print_session_header, print_progress_summary
 from core.prompts import get_initializer_prompt, get_coding_prompt, copy_spec_to_project
 from core.observability import SessionLogger, QuietOutputFilter, create_session_logger
 from core.intervention import InterventionManager
+from core.structured_logging import (
+    get_logger,
+    set_session_id,
+    set_project_id,
+    clear_context,
+    PerformanceLogger
+)
+from core.errors import (
+    SessionError,
+    ToolExecutionError,
+    ClaudeAPIError
+)
+
+logger = get_logger(__name__)
 
 
 # Configuration
@@ -114,6 +128,18 @@ async def run_agent_session(
         - "continue" if agent should continue working
         - "error" if an error occurred
     """
+    # Set context for structured logging
+    if hasattr(logger, "session_id"):
+        set_session_id(str(logger.session_id))
+    if hasattr(logger, "project_id"):
+        set_project_id(str(logger.project_id))
+
+    logger.info("Starting agent session", extra={
+        "project_dir": str(project_dir),
+        "verbose": verbose,
+        "intervention_enabled": intervention_config.get("enabled", False) if intervention_config else False
+    })
+
     output_filter = QuietOutputFilter(verbose=verbose)
 
     # Initialize intervention manager if config provided
@@ -444,14 +470,32 @@ async def run_agent_session(
         # Finalize logging and get session summary
         session_summary = logger.finalize("continue", response_text, usage_data=usage_data)
 
+        logger.info("Agent session completed successfully", extra={
+            "status": "continue",
+            "message_count": message_count,
+            "usage": usage_data
+        })
+
+        # Clear context before returning
+        clear_context()
+
         return "continue", response_text, session_summary
 
     except Exception as e:
         print(f"Error during agent session: {e}")
 
-        # Log error
+        # Log error with structured logging
+        logger.error("Agent session failed", exc_info=True, extra={
+            "error_type": type(e).__name__,
+            "message_count": message_count if 'message_count' in locals() else 0
+        })
+
+        # Log error to session logger
         logger.log_error(e)
         session_summary = logger.finalize("error", "", usage_data=usage_data)
+
+        # Clear context before returning
+        clear_context()
 
         return "error", str(e), session_summary
 

@@ -31,6 +31,7 @@ import tempfile
 import shutil
 
 from fastapi import FastAPI, HTTPException, WebSocket, WebSocketDisconnect, BackgroundTasks, UploadFile, File, Form, Body, Depends
+from fastapi.responses import JSONResponse
 from fastapi.middleware.cors import CORSMiddleware
 from pydantic import BaseModel, Field
 from dotenv import load_dotenv
@@ -72,8 +73,11 @@ from core.database_connection import DatabaseManager, is_postgresql_configured, 
 from core.config import Config
 from core.reset import reset_project
 from api.prompt_improvements_routes import router as prompt_improvements_router
+from core.structured_logging import get_logger, set_request_id, clear_context
+from core.errors import YokeFlowError, DatabaseError, ValidationError
 
-logger = logging.getLogger(__name__)
+# Use structured logging
+logger = get_logger(__name__)
 
 # =============================================================================
 # API Models (Request/Response)
@@ -220,6 +224,26 @@ app.add_middleware(
     allow_methods=["*"],
     allow_headers=["*"],
 )
+
+# Exception handlers for structured error responses
+@app.exception_handler(YokeFlowError)
+async def yokeflow_error_handler(request, exc: YokeFlowError):
+    """Handle YokeFlow custom errors with structured responses."""
+    status_code = 503 if exc.recoverable else 500
+    logger.error(
+        f"YokeFlow error: {exc.error_code}",
+        exc_info=True,
+        extra={
+            "error_code": exc.error_code,
+            "category": exc.category.value,
+            "recoverable": exc.recoverable,
+            "context": exc.context
+        }
+    )
+    return JSONResponse(
+        status_code=status_code,
+        content=exc.to_dict()
+    )
 
 # Include routers
 app.include_router(prompt_improvements_router)
