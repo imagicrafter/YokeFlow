@@ -2012,6 +2012,311 @@ class TaskDatabase:
             result['unreviewed_session_numbers'] = [row['session_number'] for row in unreviewed]
             return result
 
+    # =========================================================================
+    # Paused Sessions and Intervention Operations
+    # =========================================================================
+
+    @with_retry(RetryConfig(max_retries=3, base_delay=1.0))
+    async def pause_session(
+        self,
+        session_id: UUID,
+        project_id: UUID,
+        reason: str,
+        pause_type: str,
+        blocker_info: Optional[Dict[str, Any]] = None,
+        retry_stats: Optional[Dict[str, Any]] = None,
+        current_task_id: Optional[int] = None,
+        current_task_description: Optional[str] = None,
+        message_count: Optional[int] = None,
+        error_messages: Optional[List[str]] = None
+    ) -> UUID:
+        """
+        Pause a session and save its state to database.
+
+        Uses the pause_session() SQL function for atomic operation.
+
+        Args:
+            session_id: Session UUID to pause
+            project_id: Project UUID
+            reason: Reason for pausing
+            pause_type: Type of pause (retry_limit, critical_error, manual, timeout)
+            blocker_info: Information about the blocker
+            retry_stats: Retry statistics
+            current_task_id: Current task ID
+            current_task_description: Current task description
+            message_count: Number of messages in session
+            error_messages: List of error messages
+
+        Returns:
+            UUID of the paused session record
+        """
+        async with self.acquire() as conn:
+            paused_session_id = await conn.fetchval(
+                """
+                SELECT pause_session(
+                    $1::UUID, $2::UUID, $3, $4,
+                    $5::jsonb, $6::jsonb, $7, $8
+                )
+                """,
+                session_id,
+                project_id,
+                reason,
+                pause_type,
+                json.dumps(blocker_info or {}),
+                json.dumps(retry_stats or {}),
+                current_task_id,
+                current_task_description
+            )
+
+            # Update additional fields not in the SQL function
+            if message_count is not None or error_messages is not None:
+                update_parts = []
+                params = []
+                param_idx = 2
+
+                if message_count is not None:
+                    update_parts.append(f"message_count = ${param_idx}")
+                    params.append(message_count)
+                    param_idx += 1
+
+                if error_messages is not None:
+                    update_parts.append(f"error_messages = ${param_idx}")
+                    params.append(error_messages)
+                    param_idx += 1
+
+                if update_parts:
+                    query = f"""
+                        UPDATE paused_sessions
+                        SET {', '.join(update_parts)}
+                        WHERE id = $1
+                    """
+                    await conn.execute(query, paused_session_id, *params)
+
+            return paused_session_id
+
+    @with_retry(RetryConfig(max_retries=3, base_delay=1.0))
+    async def resume_session(
+        self,
+        paused_session_id: UUID,
+        resolved_by: str = "system",
+        resolution_notes: Optional[str] = None
+    ) -> bool:
+        """
+        Resume a paused session.
+
+        Uses the resume_session() SQL function for atomic operation.
+
+        Args:
+            paused_session_id: Paused session UUID
+            resolved_by: Who resolved the issue
+            resolution_notes: Notes about the resolution
+
+        Returns:
+            True if session was successfully resumed
+        """
+        async with self.acquire() as conn:
+            success = await conn.fetchval(
+                "SELECT resume_session($1::UUID, $2, $3)",
+                paused_session_id,
+                resolved_by,
+                resolution_notes
+            )
+            return success
+
+    async def get_paused_session(self, paused_session_id: UUID) -> Optional[Dict[str, Any]]:
+        """
+        Get a paused session by ID.
+
+        Args:
+            paused_session_id: Paused session UUID
+
+        Returns:
+            Paused session record or None
+        """
+        async with self.acquire() as conn:
+            row = await conn.fetchrow(
+                "SELECT * FROM paused_sessions WHERE id = $1",
+                paused_session_id
+            )
+            return dict(row) if row else None
+
+    async def get_active_pauses(
+        self,
+        project_id: Optional[UUID] = None
+    ) -> List[Dict[str, Any]]:
+        """
+        Get all active (unresolved) paused sessions.
+
+        Args:
+            project_id: Optional project UUID to filter by
+
+        Returns:
+            List of active paused sessions with project info
+        """
+        async with self.acquire() as conn:
+            if project_id:
+                rows = await conn.fetch(
+                    "SELECT * FROM v_active_interventions WHERE project_id = $1",
+                    project_id
+                )
+            else:
+                rows = await conn.fetch("SELECT * FROM v_active_interventions")
+
+            return [dict(row) for row in rows]
+
+    async def get_intervention_history(
+        self,
+        project_id: Optional[UUID] = None,
+        limit: int = 50
+    ) -> List[Dict[str, Any]]:
+        """
+        Get history of resolved interventions.
+
+        Args:
+            project_id: Optional project UUID to filter by
+            limit: Maximum number of records to return
+
+        Returns:
+            List of resolved interventions
+        """
+        async with self.acquire() as conn:
+            if project_id:
+                rows = await conn.fetch(
+                    """
+                    SELECT * FROM v_intervention_history
+                    WHERE project_id = $1
+                    ORDER BY resolved_at DESC
+                    LIMIT $2
+                    """,
+                    project_id, limit
+                )
+            else:
+                rows = await conn.fetch(
+                    """
+                    SELECT * FROM v_intervention_history
+                    ORDER BY resolved_at DESC
+                    LIMIT $1
+                    """,
+                    limit
+                )
+
+            return [dict(row) for row in rows]
+
+    async def log_intervention_action(
+        self,
+        paused_session_id: UUID,
+        action_type: str,
+        action_status: str,
+        action_details: Optional[Dict[str, Any]] = None,
+        result_message: Optional[str] = None,
+        error_message: Optional[str] = None
+    ) -> UUID:
+        """
+        Log an intervention action.
+
+        Args:
+            paused_session_id: Paused session UUID
+            action_type: Type of action (notification_sent, auto_recovery, manual_fix, resumed)
+            action_status: Status (pending, success, failed)
+            action_details: Additional details about the action
+            result_message: Result message
+            error_message: Error message if failed
+
+        Returns:
+            UUID of the action record
+        """
+        async with self.acquire() as conn:
+            action_id = await conn.fetchval(
+                """
+                INSERT INTO intervention_actions (
+                    paused_session_id,
+                    action_type,
+                    action_status,
+                    action_details,
+                    result_message,
+                    error_message,
+                    completed_at
+                )
+                VALUES ($1, $2, $3, $4, $5, $6,
+                    CASE WHEN $3 IN ('success', 'failed') THEN NOW() ELSE NULL END)
+                RETURNING id
+                """,
+                paused_session_id,
+                action_type,
+                action_status,
+                json.dumps(action_details or {}),
+                result_message,
+                error_message
+            )
+            return action_id
+
+    async def update_intervention_action(
+        self,
+        action_id: UUID,
+        action_status: str,
+        result_message: Optional[str] = None,
+        error_message: Optional[str] = None
+    ):
+        """
+        Update an intervention action's status.
+
+        Args:
+            action_id: Action UUID
+            action_status: New status
+            result_message: Optional result message
+            error_message: Optional error message
+        """
+        async with self.acquire() as conn:
+            await conn.execute(
+                """
+                UPDATE intervention_actions
+                SET action_status = $2,
+                    result_message = COALESCE($3, result_message),
+                    error_message = COALESCE($4, error_message),
+                    completed_at = CASE
+                        WHEN $2 IN ('success', 'failed') THEN NOW()
+                        ELSE completed_at
+                    END
+                WHERE id = $1
+                """,
+                action_id,
+                action_status,
+                result_message,
+                error_message
+            )
+
+    async def set_pause_resume_prompt(
+        self,
+        paused_session_id: UUID,
+        resume_prompt: str,
+        can_auto_resume: bool = False,
+        resume_context: Optional[Dict[str, Any]] = None
+    ):
+        """
+        Set resume information for a paused session.
+
+        Args:
+            paused_session_id: Paused session UUID
+            resume_prompt: Custom prompt for resuming
+            can_auto_resume: Whether the session can auto-resume
+            resume_context: Additional context for resume
+        """
+        async with self.acquire() as conn:
+            await conn.execute(
+                """
+                UPDATE paused_sessions
+                SET resume_prompt = $2,
+                    can_auto_resume = $3,
+                    resume_context = $4,
+                    updated_at = NOW()
+                WHERE id = $1
+                """,
+                paused_session_id,
+                resume_prompt,
+                can_auto_resume,
+                json.dumps(resume_context or {})
+            )
+
 
 # =============================================================================
 # Factory function for compatibility
