@@ -31,6 +31,7 @@ import tempfile
 import shutil
 
 from fastapi import FastAPI, HTTPException, WebSocket, WebSocketDisconnect, BackgroundTasks, UploadFile, File, Form, Body, Depends
+from fastapi.responses import JSONResponse
 from fastapi.middleware.cors import CORSMiddleware
 from fastapi.responses import StreamingResponse
 from pydantic import BaseModel, Field
@@ -74,8 +75,16 @@ from core.config import Config
 from core.reset import reset_project
 from core.spec_generator import generate_spec_stream
 from api.prompt_improvements_routes import router as prompt_improvements_router
+from core.structured_logging import (
+    get_logger,
+    set_request_id,
+    clear_context,
+    setup_structured_logging
+)
+from core.errors import YokeFlowError, DatabaseError, ValidationError
 
-logger = logging.getLogger(__name__)
+# Use structured logging
+logger = get_logger(__name__)
 
 # =============================================================================
 # API Models (Request/Response)
@@ -151,15 +160,20 @@ async def orchestrator_event_callback(project_id: UUID, event_type: str, data: D
 
 orchestrator = AgentOrchestrator(verbose=False, event_callback=orchestrator_event_callback)
 
-# Configure logging for the application
-# This ensures logger.info() calls from all modules are visible
-# Read log level from .env file (defaults to ERROR if not set)
-log_level_str = os.getenv('LOG_LEVEL', 'ERROR').upper()
-log_level = getattr(logging, log_level_str, logging.ERROR)
-logging.basicConfig(
-    level=log_level,
-    format='%(asctime)s - %(name)s - %(levelname)s - %(message)s',
-    datefmt='%Y-%m-%d %H:%M:%S'
+# Configure structured logging for the application
+# Read log level from .env file (defaults to INFO if not set)
+log_level_str = os.getenv('LOG_LEVEL', 'INFO').upper()
+log_format = os.getenv('LOG_FORMAT', 'dev')  # 'dev' or 'json'
+
+# Create logs directory
+logs_dir = Path("logs")
+logs_dir.mkdir(exist_ok=True)
+
+# Initialize structured logging
+setup_structured_logging(
+    level=log_level_str,
+    format_type=log_format,
+    log_file=logs_dir / "yokeflow.log"
 )
 
 @asynccontextmanager
@@ -222,6 +236,26 @@ app.add_middleware(
     allow_methods=["*"],
     allow_headers=["*"],
 )
+
+# Exception handlers for structured error responses
+@app.exception_handler(YokeFlowError)
+async def yokeflow_error_handler(request, exc: YokeFlowError):
+    """Handle YokeFlow custom errors with structured responses."""
+    status_code = 503 if exc.recoverable else 500
+    logger.error(
+        f"YokeFlow error: {exc.error_code}",
+        exc_info=True,
+        extra={
+            "error_code": exc.error_code,
+            "category": exc.category.value,
+            "recoverable": exc.recoverable,
+            "context": exc.context
+        }
+    )
+    return JSONResponse(
+        status_code=status_code,
+        content=exc.to_dict()
+    )
 
 # Include routers
 app.include_router(prompt_improvements_router)
@@ -2649,6 +2683,201 @@ async def trigger_bulk_reviews(
         raise HTTPException(status_code=400, detail=f"Invalid UUID format: {e}")
     except Exception as e:
         logger.error(f"Failed to trigger bulk reviews: {e}", exc_info=True)
+        raise HTTPException(status_code=500, detail=str(e))
+
+
+# =============================================================================
+# Intervention Management Endpoints
+# =============================================================================
+
+class InterventionResponse(BaseModel):
+    """Response model for intervention information."""
+    id: str  # UUID as string
+    session_id: str
+    project_id: str
+    project_name: str
+    pause_reason: str
+    pause_type: str
+    paused_at: str
+    resolved: bool
+    resolved_at: Optional[str] = None
+    resolved_by: Optional[str] = None
+    resolution_notes: Optional[str] = None
+    blocker_info: Dict = {}
+    retry_stats: Dict = {}
+    current_task_id: Optional[str] = None
+    current_task_description: Optional[str] = None
+    can_auto_resume: bool = False
+
+
+class ResumeSessionRequest(BaseModel):
+    """Request model for resuming a paused session."""
+    resolved_by: str = "user"
+    resolution_notes: Optional[str] = None
+
+
+@app.get("/api/interventions/active", response_model=List[InterventionResponse])
+async def get_active_interventions(
+    project_id: Optional[str] = None,
+    db=Depends(get_db)
+) -> List[InterventionResponse]:
+    """Get all active (unresolved) interventions requiring human attention."""
+    try:
+        from core.session_manager import PausedSessionManager
+
+        manager = PausedSessionManager()
+        interventions = await manager.get_active_pauses(project_id)
+
+        return [
+            InterventionResponse(
+                id=str(i["id"]),
+                session_id=str(i["session_id"]),
+                project_id=str(i["project_id"]),
+                project_name=i["project_name"],
+                pause_reason=i["pause_reason"],
+                pause_type=i["pause_type"],
+                paused_at=i["paused_at"].isoformat() if hasattr(i["paused_at"], "isoformat") else str(i["paused_at"]),
+                resolved=i["resolved"],
+                resolved_at=i["resolved_at"].isoformat() if i.get("resolved_at") and hasattr(i["resolved_at"], "isoformat") else None,
+                resolved_by=i.get("resolved_by"),
+                resolution_notes=i.get("resolution_notes"),
+                blocker_info=i.get("blocker_info", {}),
+                retry_stats=i.get("retry_stats", {}),
+                current_task_id=str(i["current_task_id"]) if i.get("current_task_id") else None,
+                current_task_description=i.get("current_task_description"),
+                can_auto_resume=i.get("can_auto_resume", False)
+            )
+            for i in interventions
+        ]
+    except Exception as e:
+        logger.error(f"Error getting active interventions: {e}")
+        raise HTTPException(status_code=500, detail=str(e))
+
+
+@app.post("/api/interventions/{intervention_id}/resume", response_model=Dict)
+async def resume_paused_session(
+    intervention_id: str,
+    request: ResumeSessionRequest,
+    background_tasks: BackgroundTasks,
+    db=Depends(get_db)
+) -> Dict:
+    """Resume a paused session after resolving the issue."""
+    try:
+        from core.session_manager import PausedSessionManager
+
+        manager = PausedSessionManager()
+        resume_context = await manager.resume_session(
+            intervention_id,
+            request.resolved_by,
+            request.resolution_notes
+        )
+
+        # Schedule the session to be resumed in the background
+        async def resume_in_background():
+            try:
+                orchestrator = AgentOrchestrator()
+                # Start a new coding session with the resume context
+                session_info = await orchestrator.start_session(
+                    project_id=resume_context["project_id"],
+                    session_type=SessionType.CODING,
+                    resume_context=resume_context
+                )
+                logger.info(f"Resumed session {session_info.session_id} for project {resume_context['project_id']}")
+            except Exception as e:
+                logger.error(f"Failed to resume session: {e}")
+
+        background_tasks.add_task(resume_in_background)
+
+        return {
+            "status": "resuming",
+            "message": f"Session resuming for project {resume_context['project_name']}",
+            "session_id": resume_context["session_id"],
+            "project_id": resume_context["project_id"]
+        }
+
+    except ValueError as e:
+        raise HTTPException(status_code=404, detail=str(e))
+    except Exception as e:
+        logger.error(f"Error resuming session: {e}")
+        raise HTTPException(status_code=500, detail=str(e))
+
+
+@app.get("/api/interventions/history", response_model=List[InterventionResponse])
+async def get_intervention_history(
+    project_id: Optional[str] = None,
+    limit: int = 50,
+    db=Depends(get_db)
+) -> List[InterventionResponse]:
+    """Get history of resolved interventions."""
+    try:
+        from core.session_manager import PausedSessionManager
+
+        manager = PausedSessionManager()
+        interventions = await manager.get_intervention_history(project_id, limit)
+
+        return [
+            InterventionResponse(
+                id=str(i["id"]),
+                session_id=str(i["session_id"]),
+                project_id=str(i["project_id"]),
+                project_name=i["project_name"],
+                pause_reason=i["pause_reason"],
+                pause_type=i["pause_type"],
+                paused_at=i["paused_at"].isoformat() if hasattr(i["paused_at"], "isoformat") else str(i["paused_at"]),
+                resolved=i["resolved"],
+                resolved_at=i["resolved_at"].isoformat() if i.get("resolved_at") and hasattr(i["resolved_at"], "isoformat") else None,
+                resolved_by=i.get("resolved_by"),
+                resolution_notes=i.get("resolution_notes"),
+                blocker_info=i.get("blocker_info", {}),
+                retry_stats=i.get("retry_stats", {}),
+                current_task_id=str(i["current_task_id"]) if i.get("current_task_id") else None,
+                current_task_description=i.get("current_task_description"),
+                can_auto_resume=i.get("can_auto_resume", False)
+            )
+            for i in interventions
+        ]
+    except Exception as e:
+        logger.error(f"Error getting intervention history: {e}")
+        raise HTTPException(status_code=500, detail=str(e))
+
+
+@app.get("/api/projects/{project_id}/notifications/preferences")
+async def get_notification_preferences(
+    project_id: str,
+    db=Depends(get_db)
+) -> Dict:
+    """Get notification preferences for a project."""
+    try:
+        from core.notifications import NotificationPreferencesManager
+
+        project_uuid = UUID(project_id)
+        prefs = await NotificationPreferencesManager.get_preferences(project_id)
+        return prefs
+    except Exception as e:
+        logger.error(f"Error getting notification preferences: {e}")
+        raise HTTPException(status_code=500, detail=str(e))
+
+
+@app.post("/api/projects/{project_id}/notifications/preferences")
+async def update_notification_preferences(
+    project_id: str,
+    preferences: Dict = Body(...),
+    db=Depends(get_db)
+) -> Dict:
+    """Update notification preferences for a project."""
+    try:
+        from core.notifications import NotificationPreferencesManager
+
+        project_uuid = UUID(project_id)
+        success = await NotificationPreferencesManager.update_preferences(project_id, preferences)
+
+        if success:
+            return {"status": "success", "message": "Preferences updated"}
+        else:
+            raise HTTPException(status_code=500, detail="Failed to update preferences")
+
+    except Exception as e:
+        logger.error(f"Error updating notification preferences: {e}")
         raise HTTPException(status_code=500, detail=str(e))
 
 

@@ -22,7 +22,7 @@ from pathlib import Path
 from typing import Optional, Dict, Any, List, Callable, Awaitable, TYPE_CHECKING
 from datetime import datetime
 from uuid import UUID
-import logging
+import os
 
 import asyncpg
 
@@ -30,6 +30,7 @@ from core.client import create_client
 from core.database_connection import get_db, DatabaseManager, is_postgresql_configured
 from core.orchestrator_models import SessionStatus, SessionType, SessionInfo
 from core.quality_integration import QualityIntegration
+from core.structured_logging import get_logger, setup_structured_logging
 
 if TYPE_CHECKING:
     from core.database import TaskDatabase
@@ -44,7 +45,19 @@ from core.config import Config
 from core.sandbox_manager import SandboxManager
 from core.sandbox_hooks import set_active_sandbox, clear_active_sandbox
 
-logger = logging.getLogger(__name__)
+# Initialize structured logging if not already done (for CLI usage)
+if not any(isinstance(h.formatter, type(None)) for h in get_logger(__name__).handlers):
+    log_level = os.getenv('LOG_LEVEL', 'INFO').upper()
+    log_format = os.getenv('LOG_FORMAT', 'dev')
+    logs_dir = Path("logs")
+    logs_dir.mkdir(exist_ok=True)
+    setup_structured_logging(
+        level=log_level,
+        format_type=log_format,
+        log_file=logs_dir / "yokeflow.log"
+    )
+
+logger = get_logger(__name__)
 
 # Re-export models for backward compatibility
 __all__ = ['AgentOrchestrator', 'SessionInfo', 'SessionStatus', 'SessionType']
@@ -529,6 +542,7 @@ class AgentOrchestrator:
         coding_model: Optional[str] = None,
         max_iterations: Optional[int] = None,
         progress_callback: Optional[Callable[[Dict[str, Any]], Awaitable[None]]] = None,
+        resume_context: Optional[Dict[str, Any]] = None,
     ) -> SessionInfo:
         """
         Start an agent session for a project.
@@ -712,6 +726,9 @@ class AgentOrchestrator:
                     sandbox_type=sandbox_type,
                     event_callback=logger_event_callback
                 )
+                # Add session and project IDs for intervention system
+                session_logger.session_id = str(session_id)
+                session_logger.project_id = str(project_id)
 
                 # Register logger with session manager
                 session_manager.set_current_logger(session_logger)
@@ -738,6 +755,11 @@ class AgentOrchestrator:
                 # Get prompt based on session type and sandbox
                 if is_initializer:
                     prompt = get_initializer_prompt(sandbox_type=sandbox_type)
+                elif resume_context:
+                    # Include resume context in the prompt
+                    base_prompt = get_coding_prompt(sandbox_type=sandbox_type)
+                    resume_prompt = resume_context.get("resume_prompt", "")
+                    prompt = f"{base_prompt}\n\n{resume_prompt}"
                 else:
                     prompt = get_coding_prompt(sandbox_type=sandbox_type)
 
@@ -759,9 +781,20 @@ class AgentOrchestrator:
                 # Run session
                 try:
                     async with client:
+                        # Prepare intervention config
+                        intervention_config = {
+                            "enabled": self.config.intervention.enabled,
+                            "max_retries": self.config.intervention.max_retries,
+                            "notifications": {
+                                "enabled": bool(self.config.intervention.webhook_url),
+                                "webhook_url": self.config.intervention.webhook_url
+                            }
+                        }
+
                         status, response, session_summary = await run_agent_session(
                             client, prompt, project_path, logger=session_logger, verbose=self.verbose,
-                            session_manager=session_manager, progress_callback=progress_callback
+                            session_manager=session_manager, progress_callback=progress_callback,
+                            intervention_config=intervention_config
                         )
                 finally:
                     # Stop heartbeat task
