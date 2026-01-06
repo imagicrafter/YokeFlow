@@ -539,8 +539,13 @@ export default function CreateProjectPage() {
                     {contextFiles.length} file{contextFiles.length > 1 ? 's' : ''} added for context
                   </div>
                 ) : (
-                  <div className="text-sm text-gray-500">
-                    Drop code examples or existing specs to provide context
+                  <div className="space-y-1">
+                    <div className="text-sm text-gray-500">
+                      Drop code examples, schemas, or existing specs to provide context
+                    </div>
+                    <div className="text-xs text-gray-600">
+                      Supported: .txt, .md, .py, .ts, .js, .tsx, .jsx, .json, .yaml, .yml, .sql, .sh, .css, .html
+                    </div>
                   </div>
                 )}
               </div>
