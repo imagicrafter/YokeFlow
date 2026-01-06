@@ -2,8 +2,8 @@
 App Spec Generator
 ==================
 
-Generates app_spec.txt files from natural language descriptions using Claude.
-Produces structured XML output matching YokeFlow's specification format.
+Generates app_spec.md files from natural language descriptions using Claude.
+Produces structured markdown output with section markers for agent consumption.
 
 Usage:
     from core.spec_generator import generate_spec_stream
@@ -19,49 +19,20 @@ import logging
 import os
 import re
 import tempfile
-from dataclasses import dataclass, field
+from datetime import datetime
 from pathlib import Path
 from typing import AsyncGenerator, Dict, List, Optional, Any
 
 from dotenv import load_dotenv
+from core.context_strategy import analyze_context_strategy
 
 logger = logging.getLogger(__name__)
 
 
 # ============================================================================
-# Data Models
+# JSON Schema for Claude's Output
 # ============================================================================
 
-@dataclass
-class RoadmapPhase:
-    """A phase in the implementation roadmap."""
-    phase: str
-    status: str  # Always "pending" for new projects
-    description: str
-
-
-@dataclass
-class ImplementedFeature:
-    """A feature that has been implemented (empty for new projects)."""
-    name: str
-    description: str
-    file_locations: Optional[List[str]] = None
-
-
-@dataclass
-class SpecOutput:
-    """Structured output for project specification."""
-    project_name: str
-    overview: str
-    technology_stack: List[str]
-    core_capabilities: List[str]
-    implemented_features: List[Dict[str, Any]] = field(default_factory=list)
-    additional_requirements: Optional[List[str]] = None
-    development_guidelines: Optional[List[str]] = None
-    implementation_roadmap: Optional[List[Dict[str, str]]] = None
-
-
-# JSON Schema for Claude's structured output
 SPEC_OUTPUT_SCHEMA = {
     "type": "object",
     "properties": {
@@ -70,181 +41,464 @@ SPEC_OUTPUT_SCHEMA = {
             "description": "Project name in lowercase with hyphens (e.g., 'task-manager')"
         },
         "overview": {
-            "type": "string",
-            "description": "Comprehensive description of the project's purpose, users, and goals"
+            "type": "object",
+            "properties": {
+                "summary": {
+                    "type": "string",
+                    "description": "One paragraph describing what the app does, who it's for, and core problem it solves"
+                },
+                "success_criteria": {
+                    "type": "array",
+                    "items": {"type": "string"},
+                    "description": "3-5 measurable success criteria"
+                },
+                "constraints": {
+                    "type": "array",
+                    "items": {
+                        "type": "object",
+                        "properties": {
+                            "type": {"type": "string"},
+                            "constraint": {"type": "string"}
+                        }
+                    },
+                    "description": "Timeline, compliance, compatibility constraints"
+                },
+                "out_of_scope": {
+                    "type": "array",
+                    "items": {"type": "string"},
+                    "description": "Features explicitly out of scope for MVP"
+                }
+            },
+            "required": ["summary", "success_criteria"]
         },
-        "technology_stack": {
-            "type": "array",
-            "items": {"type": "string"},
-            "description": "List of technologies, frameworks, and tools to use"
-        },
-        "core_capabilities": {
-            "type": "array",
-            "items": {"type": "string"},
-            "description": "Main feature areas the application must provide"
-        },
-        "implemented_features": {
+        "tech_stack": {
             "type": "array",
             "items": {
                 "type": "object",
                 "properties": {
-                    "name": {"type": "string"},
-                    "description": {"type": "string"},
-                    "file_locations": {
-                        "type": "array",
-                        "items": {"type": "string"}
+                    "layer": {"type": "string"},
+                    "technology": {"type": "string"},
+                    "version": {"type": "string"}
+                }
+            },
+            "description": "Tech stack as layer/technology/version tuples"
+        },
+        "frontend": {
+            "type": "object",
+            "properties": {
+                "framework": {"type": "string"},
+                "styling": {"type": "string"},
+                "state_management": {"type": "string"},
+                "routing": {"type": "string"},
+                "build_tool": {"type": "string"},
+                "key_dependencies": {"type": "object"},
+                "directory_structure": {"type": "string"}
+            }
+        },
+        "backend": {
+            "type": "object",
+            "properties": {
+                "framework": {"type": "string"},
+                "python_version": {"type": "string"},
+                "orm": {"type": "string"},
+                "validation": {"type": "string"},
+                "auth": {"type": "string"},
+                "key_dependencies": {"type": "array", "items": {"type": "string"}},
+                "directory_structure": {"type": "string"}
+            }
+        },
+        "database": {
+            "type": "object",
+            "properties": {
+                "engine": {"type": "string"},
+                "driver": {"type": "string"},
+                "migrations": {"type": "string"},
+                "conventions": {
+                    "type": "array",
+                    "items": {
+                        "type": "object",
+                        "properties": {
+                            "convention": {"type": "string"},
+                            "rule": {"type": "string"}
+                        }
+                    }
+                }
+            }
+        },
+        "environment": {
+            "type": "object",
+            "properties": {
+                "prerequisites": {
+                    "type": "array",
+                    "items": {
+                        "type": "object",
+                        "properties": {
+                            "tool": {"type": "string"},
+                            "version": {"type": "string"}
+                        }
                     }
                 },
-                "required": ["name", "description"]
-            },
-            "description": "Features already implemented (leave empty for new projects)"
-        },
-        "additional_requirements": {
-            "type": "array",
-            "items": {"type": "string"},
-            "description": "Non-functional requirements like performance, security, deployment"
-        },
-        "development_guidelines": {
-            "type": "array",
-            "items": {"type": "string"},
-            "description": "Coding standards and practices to follow"
-        },
-        "implementation_roadmap": {
-            "type": "array",
-            "items": {
-                "type": "object",
-                "properties": {
-                    "phase": {
-                        "type": "string",
-                        "description": "Name of the implementation phase"
-                    },
-                    "status": {
-                        "type": "string",
-                        "enum": ["pending", "in_progress", "completed"],
-                        "description": "Current status (use 'pending' for new projects)"
-                    },
-                    "description": {
-                        "type": "string",
-                        "description": "What this phase involves"
-                    }
-                },
-                "required": ["phase", "status", "description"]
-            },
-            "description": "Implementation phases ordered by dependency"
+                "env_variables": {"type": "array", "items": {"type": "string"}}
+            }
         }
     },
-    "required": [
-        "project_name",
-        "overview",
-        "technology_stack",
-        "core_capabilities",
-        "implemented_features"
-    ],
-    "additionalProperties": False
+    "required": ["project_name", "overview", "tech_stack"]
 }
 
 
 # ============================================================================
-# XML Conversion
+# Markdown Conversion
 # ============================================================================
 
-def escape_xml(text: str) -> str:
-    """Escape special XML characters."""
-    if not text:
-        return ""
-    return (
-        text
-        .replace("&", "&amp;")
-        .replace("<", "&lt;")
-        .replace(">", "&gt;")
-        .replace('"', "&quot;")
-        .replace("'", "&apos;")
-    )
-
-
-def spec_to_xml(spec: Dict[str, Any]) -> str:
+def spec_to_markdown(spec: Dict[str, Any]) -> str:
     """
-    Convert a SpecOutput dictionary to XML format.
-
-    Matches YokeFlow's app_spec.txt format:
-    - 2-space indentation
-    - Proper XML escaping
-    - All sections in order
+    Convert a spec dictionary to clean markdown format.
+    
+    Uses standard markdown headers. Section boundaries are implicit.
     """
-    indent = "  "
-
-    # Start XML document
-    xml_parts = [
-        '<?xml version="1.0" encoding="UTF-8"?>',
-        '<project_specification>',
-        f'{indent}<project_name>{escape_xml(spec["project_name"])}</project_name>',
-        '',
-        f'{indent}<overview>',
-        f'{indent}{indent}{escape_xml(spec["overview"])}',
-        f'{indent}</overview>',
-        ''
-    ]
-
-    # Technology stack
-    xml_parts.append(f'{indent}<technology_stack>')
-    for tech in spec.get("technology_stack", []):
-        xml_parts.append(f'{indent}{indent}<technology>{escape_xml(tech)}</technology>')
-    xml_parts.append(f'{indent}</technology_stack>')
-    xml_parts.append('')
-
-    # Core capabilities
-    xml_parts.append(f'{indent}<core_capabilities>')
-    for cap in spec.get("core_capabilities", []):
-        xml_parts.append(f'{indent}{indent}<capability>{escape_xml(cap)}</capability>')
-    xml_parts.append(f'{indent}</core_capabilities>')
-    xml_parts.append('')
-
-    # Implemented features (usually empty for new projects)
-    xml_parts.append(f'{indent}<implemented_features>')
-    for feature in spec.get("implemented_features", []):
-        xml_parts.append(f'{indent}{indent}<feature>')
-        xml_parts.append(f'{indent}{indent}{indent}<name>{escape_xml(feature.get("name", ""))}</name>')
-        xml_parts.append(f'{indent}{indent}{indent}<description>{escape_xml(feature.get("description", ""))}</description>')
-        if feature.get("file_locations"):
-            xml_parts.append(f'{indent}{indent}{indent}<file_locations>')
-            for loc in feature["file_locations"]:
-                xml_parts.append(f'{indent}{indent}{indent}{indent}<location>{escape_xml(loc)}</location>')
-            xml_parts.append(f'{indent}{indent}{indent}</file_locations>')
-        xml_parts.append(f'{indent}{indent}</feature>')
-    xml_parts.append(f'{indent}</implemented_features>')
-
-    # Additional requirements (optional)
-    if spec.get("additional_requirements"):
-        xml_parts.append('')
-        xml_parts.append(f'{indent}<additional_requirements>')
-        for req in spec["additional_requirements"]:
-            xml_parts.append(f'{indent}{indent}<requirement>{escape_xml(req)}</requirement>')
-        xml_parts.append(f'{indent}</additional_requirements>')
-
-    # Development guidelines (optional)
-    if spec.get("development_guidelines"):
-        xml_parts.append('')
-        xml_parts.append(f'{indent}<development_guidelines>')
-        for guideline in spec["development_guidelines"]:
-            xml_parts.append(f'{indent}{indent}<guideline>{escape_xml(guideline)}</guideline>')
-        xml_parts.append(f'{indent}</development_guidelines>')
-
-    # Implementation roadmap (optional)
-    if spec.get("implementation_roadmap"):
-        xml_parts.append('')
-        xml_parts.append(f'{indent}<implementation_roadmap>')
-        for phase in spec["implementation_roadmap"]:
-            xml_parts.append(f'{indent}{indent}<phase>')
-            xml_parts.append(f'{indent}{indent}{indent}<name>{escape_xml(phase.get("phase", ""))}</name>')
-            xml_parts.append(f'{indent}{indent}{indent}<status>{escape_xml(phase.get("status", "pending"))}</status>')
-            xml_parts.append(f'{indent}{indent}{indent}<description>{escape_xml(phase.get("description", ""))}</description>')
-            xml_parts.append(f'{indent}{indent}</phase>')
-        xml_parts.append(f'{indent}</implementation_roadmap>')
-
-    # Close root element
-    xml_parts.append('</project_specification>')
-
-    return '\n'.join(xml_parts)
+    timestamp = datetime.now().strftime("%Y-%m-%d %H:%M")
+    project_name = spec.get("project_name", "Untitled Project")
+    
+    lines = []
+    
+    # Header
+    lines.append(f"# App Specification: {project_name}")
+    lines.append("")
+    lines.append(f"> **Generated**: {timestamp}")
+    lines.append("> **Status**: Pending Validation")
+    lines.append("> **Version**: 1.0")
+    lines.append("")
+    lines.append("---")
+    lines.append("")
+    
+    # Overview Section
+    lines.append("## Overview")
+    lines.append("")
+    
+    overview = spec.get("overview", {})
+    if isinstance(overview, str):
+        # Handle old format
+        lines.append("### Project Summary")
+        lines.append("")
+        lines.append(overview)
+    else:
+        lines.append("### Project Summary")
+        lines.append("")
+        lines.append(overview.get("summary", ""))
+        lines.append("")
+        
+        # Success Criteria
+        if overview.get("success_criteria"):
+            lines.append("### Success Criteria")
+            lines.append("")
+            for criterion in overview["success_criteria"]:
+                lines.append(f"- {criterion}")
+            lines.append("")
+        
+        # Constraints
+        if overview.get("constraints"):
+            lines.append("### Constraints")
+            lines.append("")
+            lines.append("| Type | Constraint |")
+            lines.append("|------|------------|")
+            for constraint in overview["constraints"]:
+                if isinstance(constraint, dict):
+                    lines.append(f"| {constraint.get('type', '')} | {constraint.get('constraint', '')} |")
+                else:
+                    lines.append(f"| General | {constraint} |")
+            lines.append("")
+        
+        # Out of Scope
+        if overview.get("out_of_scope"):
+            lines.append("### Out of Scope (MVP)")
+            lines.append("")
+            for item in overview["out_of_scope"]:
+                lines.append(f"- {item}")
+            lines.append("")
+    
+    lines.append("---")
+    lines.append("")
+    
+    # Tech Stack Summary
+    lines.append("## Tech Stack")
+    lines.append("")
+    tech_stack = spec.get("tech_stack", [])
+    if tech_stack:
+        lines.append("| Layer | Technology | Version |")
+        lines.append("|-------|------------|---------|")
+        for item in tech_stack:
+            if isinstance(item, dict):
+                lines.append(f"| {item.get('layer', '')} | {item.get('technology', '')} | {item.get('version', '')} |")
+            else:
+                lines.append(f"| General | {item} | latest |")
+        lines.append("")
+    lines.append("---")
+    lines.append("")
+    
+    # Frontend Section
+    frontend = spec.get("frontend", {})
+    lines.append("## Frontend")
+    lines.append("")
+    lines.append("### Technology Choices")
+    lines.append("")
+    if frontend:
+        lines.append(f"- **Framework**: {frontend.get('framework', 'React 18.x with TypeScript')}")
+        lines.append(f"- **Styling**: {frontend.get('styling', 'Tailwind CSS 3.x')}")
+        lines.append(f"- **State Management**: {frontend.get('state_management', 'Zustand for client state, React Query for server state')}")
+        lines.append(f"- **Routing**: {frontend.get('routing', 'React Router 6.x')}")
+        lines.append(f"- **Build Tool**: {frontend.get('build_tool', 'Vite')}")
+    else:
+        lines.append("- **Framework**: React 18.x with TypeScript (strict mode)")
+        lines.append("- **Styling**: Tailwind CSS 3.x")
+        lines.append("- **State Management**: Zustand for client state, React Query for server state")
+        lines.append("- **Routing**: React Router 6.x")
+        lines.append("- **Build Tool**: Vite")
+    lines.append("")
+    
+    # Frontend directory structure
+    lines.append("### Directory Structure")
+    lines.append("")
+    lines.append("```")
+    if frontend.get("directory_structure"):
+        lines.append(frontend["directory_structure"])
+    else:
+        lines.append("""frontend/
+├── src/
+│   ├── components/
+│   │   ├── ui/              # Base components (Button, Input, Modal, etc.)
+│   │   └── features/        # Feature-specific components
+│   ├── pages/               # Route-level components
+│   ├── hooks/               # Custom React hooks
+│   ├── store/               # Zustand stores
+│   ├── services/            # API client functions
+│   ├── types/               # TypeScript type definitions
+│   └── utils/               # Helper functions
+├── public/
+├── index.html
+├── package.json
+├── tailwind.config.js
+├── tsconfig.json
+└── vite.config.ts""")
+    lines.append("```")
+    lines.append("")
+    lines.append("---")
+    lines.append("")
+    
+    # Backend Section
+    backend = spec.get("backend", {})
+    lines.append("## Backend")
+    lines.append("")
+    lines.append("### Technology Choices")
+    lines.append("")
+    if backend:
+        lines.append(f"- **Framework**: {backend.get('framework', 'FastAPI 0.104+')}")
+        lines.append(f"- **Python Version**: {backend.get('python_version', '3.11+')}")
+        lines.append(f"- **ORM**: {backend.get('orm', 'SQLAlchemy 2.0 with async support')}")
+        lines.append(f"- **Validation**: {backend.get('validation', 'Pydantic v2')}")
+        lines.append(f"- **Auth**: {backend.get('auth', 'JWT with python-jose')}")
+    else:
+        lines.append("- **Framework**: FastAPI 0.104+")
+        lines.append("- **Python Version**: 3.11+")
+        lines.append("- **ORM**: SQLAlchemy 2.0 with async support")
+        lines.append("- **Validation**: Pydantic v2")
+        lines.append("- **Auth**: JWT with python-jose")
+    lines.append("")
+    
+    # Backend dependencies
+    if backend.get("key_dependencies"):
+        lines.append("### Key Dependencies")
+        lines.append("")
+        lines.append("```txt")
+        lines.append("# requirements.txt")
+        for dep in backend["key_dependencies"]:
+            lines.append(dep)
+        lines.append("```")
+        lines.append("")
+    
+    # Backend directory structure
+    lines.append("### Directory Structure")
+    lines.append("")
+    lines.append("```")
+    if backend.get("directory_structure"):
+        lines.append(backend["directory_structure"])
+    else:
+        lines.append("""backend/
+├── src/
+│   ├── api/
+│   │   └── routes/          # API route handlers
+│   ├── core/
+│   │   ├── config.py        # Settings with pydantic-settings
+│   │   ├── database.py      # Async engine and session
+│   │   ├── auth.py          # JWT utilities
+│   │   └── exceptions.py    # Custom exceptions
+│   ├── models/              # SQLAlchemy models
+│   ├── schemas/             # Pydantic schemas
+│   ├── services/            # Business logic
+│   └── utils/               # Helper functions
+├── tests/
+├── alembic/
+├── main.py
+└── requirements.txt""")
+    lines.append("```")
+    lines.append("")
+    lines.append("---")
+    lines.append("")
+    
+    # Database Section
+    database = spec.get("database", {})
+    lines.append("## Database")
+    lines.append("")
+    lines.append("### Technology Choices")
+    lines.append("")
+    if database:
+        lines.append(f"- **Engine**: {database.get('engine', 'PostgreSQL 15+')}")
+        lines.append(f"- **ORM**: {database.get('orm', 'SQLAlchemy 2.0 with async support')}")
+        lines.append(f"- **Migrations**: {database.get('migrations', 'Alembic')}")
+        lines.append(f"- **Driver**: {database.get('driver', 'asyncpg')}")
+    else:
+        lines.append("- **Engine**: PostgreSQL 15+")
+        lines.append("- **ORM**: SQLAlchemy 2.0 with async support")
+        lines.append("- **Migrations**: Alembic")
+        lines.append("- **Driver**: asyncpg")
+    lines.append("")
+    
+    # Database conventions
+    lines.append("### Schema Conventions")
+    lines.append("")
+    lines.append("| Convention | Rule |")
+    lines.append("|------------|------|")
+    if database.get("conventions"):
+        for conv in database["conventions"]:
+            if isinstance(conv, dict):
+                lines.append(f"| {conv.get('convention', '')} | {conv.get('rule', '')} |")
+    else:
+        lines.append("| Primary keys | UUID, generated with uuid4 |")
+        lines.append("| Foreign keys | Named with `_id` suffix |")
+        lines.append("| Timestamps | `created_at` and `updated_at` on all tables |")
+        lines.append("| Soft deletes | `is_deleted` boolean + `deleted_at` timestamp |")
+        lines.append("| String limits | Always specify max length |")
+        lines.append("| Indexes | On foreign keys and frequently queried fields |")
+    lines.append("")
+    lines.append("---")
+    lines.append("")
+    
+    # Testing Section
+    lines.append("## Testing")
+    lines.append("")
+    lines.append("### Backend Testing (pytest)")
+    lines.append("")
+    lines.append("- Use `pytest` with `pytest-asyncio` for async tests")
+    lines.append("- Create test database for isolation")
+    lines.append("- Use factories for test data generation")
+    lines.append("")
+    lines.append("### Frontend Testing (Vitest + React Testing Library)")
+    lines.append("")
+    lines.append("- Unit test components with `@testing-library/react`")
+    lines.append("- Mock stores and API calls")
+    lines.append("- Use `data-testid` attributes for reliable selectors")
+    lines.append("")
+    lines.append("### E2E Testing (Playwright)")
+    lines.append("")
+    lines.append("- Test complete user flows")
+    lines.append("- Use page object pattern")
+    lines.append("- Run against test database")
+    lines.append("")
+    lines.append("---")
+    lines.append("")
+    
+    # Standards Section
+    lines.append("## Coding Standards")
+    lines.append("")
+    lines.append("### General Rules")
+    lines.append("")
+    lines.append("- All code must pass linting without warnings")
+    lines.append("- No hardcoded secrets or credentials")
+    lines.append("- Environment variables for all configuration")
+    lines.append("- Meaningful variable and function names")
+    lines.append("- Comments for non-obvious logic only")
+    lines.append("")
+    lines.append("### TypeScript / Frontend")
+    lines.append("")
+    lines.append("| Rule | Example |")
+    lines.append("|------|---------|")
+    lines.append("| Strict mode enabled | `\"strict\": true` in tsconfig |")
+    lines.append("| Explicit return types | `function getName(): string` |")
+    lines.append("| No `any` type | Use `unknown` or proper types |")
+    lines.append("| Components under 200 lines | Extract sub-components |")
+    lines.append("| `data-testid` on interactive elements | `data-testid=\"submit-button\"` |")
+    lines.append("")
+    lines.append("### Python / Backend")
+    lines.append("")
+    lines.append("| Rule | Example |")
+    lines.append("|------|---------|")
+    lines.append("| Type hints on all signatures | `def create(self, data: TaskCreate) -> Task:` |")
+    lines.append("| Docstrings on public functions | Triple-quoted description |")
+    lines.append("| Async for I/O operations | `async def fetch_data():` |")
+    lines.append("| No bare `except:` | Always specify exception type |")
+    lines.append("| Max function length: 50 lines | Extract helper functions |")
+    lines.append("")
+    lines.append("### Git Conventions")
+    lines.append("")
+    lines.append("**Commit message format:**")
+    lines.append("```")
+    lines.append("<type>(<scope>): <description>")
+    lines.append("")
+    lines.append("Types: feat, fix, refactor, test, docs, chore")
+    lines.append("```")
+    lines.append("")
+    lines.append("---")
+    lines.append("")
+    
+    # Environment Section
+    environment = spec.get("environment", {})
+    lines.append("## Environment Setup")
+    lines.append("")
+    lines.append("### Prerequisites")
+    lines.append("")
+    lines.append("| Tool | Version |")
+    lines.append("|------|---------|")
+    if environment.get("prerequisites"):
+        for prereq in environment["prerequisites"]:
+            if isinstance(prereq, dict):
+                lines.append(f"| {prereq.get('tool', '')} | {prereq.get('version', '')} |")
+    else:
+        lines.append("| Node.js | 18+ |")
+        lines.append("| Python | 3.11+ |")
+        lines.append("| Docker | 24+ |")
+        lines.append("| Docker Compose | 2.0+ |")
+    lines.append("")
+    
+    # Environment variables
+    if environment.get("env_variables"):
+        lines.append("### Environment Variables")
+        lines.append("")
+        lines.append("Create a `.env` file in the project root:")
+        lines.append("")
+        lines.append("```bash")
+        for var in environment["env_variables"]:
+            lines.append(var)
+        lines.append("```")
+        lines.append("")
+    
+    lines.append("---")
+    lines.append("")
+    
+    # Validation Checklist
+    lines.append("## Validation Checklist")
+    lines.append("")
+    lines.append("Before approving this specification, please verify:")
+    lines.append("")
+    lines.append("- [ ] Project overview accurately describes your goals")
+    lines.append("- [ ] Tech stack matches your requirements")
+    lines.append("- [ ] Code patterns align with your team's style")
+    lines.append("- [ ] All constraints are captured")
+    lines.append("- [ ] Nothing critical is missing from features")
+    lines.append("")
+    lines.append("**To approve**: Confirm this specification is complete and accurate.")
+    lines.append("**To request changes**: Note specific modifications needed.")
+    lines.append("")
+    
+    return "\n".join(lines)
 
 
 # ============================================================================
@@ -271,73 +525,55 @@ Do NOT prefix the project name with "yokeflow" or any tool-related names.
 
 ## Your Task
 
-Create a comprehensive specification with these sections:
+Create a comprehensive specification following this JSON structure. The output will be converted
+to a markdown document with section markers for selective agent reading.
 
 ### 1. project_name
 - Lowercase with hyphens (e.g., "task-manager", "route-planner")
 - Concise but descriptive
 - No spaces or special characters
 
-### 2. overview
-A comprehensive paragraph (3-5 sentences) covering:
-- What the application does and its purpose
-- Target users and primary use cases
-- Key goals and value proposition
-- Important constraints or scope boundaries
+### 2. overview (object with these fields)
+- **summary**: One paragraph (3-5 sentences) describing what the app does, target users, and value proposition
+- **success_criteria**: Array of 3-5 measurable success criteria
+- **constraints**: Array of objects with "type" and "constraint" fields (timeline, compliance, compatibility)
+- **out_of_scope**: Array of features explicitly out of scope for MVP
 
-### 3. technology_stack
-List 5-10 specific technologies. Consider:
-- User's stated preferences (if any)
-- Project requirements (database needs, real-time features, etc.)
-- Agent-friendly technologies (Node.js, TypeScript, Python, React work well)
-- Include: framework, database, testing tools, key libraries
-- Be specific: "PostgreSQL" not just "database", "React" not just "frontend"
+### 3. tech_stack
+Array of objects with:
+- **layer**: Frontend, Backend, Database, Cache, Testing, etc.
+- **technology**: Specific technology name (React, FastAPI, PostgreSQL)
+- **version**: Version requirement (e.g., "18.x", "0.104+", "15+")
 
-### 4. core_capabilities
-5-10 main feature areas the application must provide.
-- Be specific: "User authentication with email/password and OAuth" not just "authentication"
-- Each capability should be a distinct, implementable feature area
-- These become the high-level epics for implementation
+### 4. frontend (object)
+- **framework**: e.g., "React 18.x with TypeScript (strict mode)"
+- **styling**: e.g., "Tailwind CSS 3.x"
+- **state_management**: e.g., "Zustand for client state, React Query for server state"
+- **routing**: e.g., "React Router 6.x"
+- **build_tool**: e.g., "Vite"
 
-### 5. implemented_features
-Leave as an empty array [] (the agent populates this during development)
+### 5. backend (object)
+- **framework**: e.g., "FastAPI 0.104+"
+- **python_version**: e.g., "3.11+"
+- **orm**: e.g., "SQLAlchemy 2.0 with async support"
+- **validation**: e.g., "Pydantic v2"
+- **auth**: e.g., "JWT with python-jose"
+- **key_dependencies**: Array of requirement lines (e.g., "fastapi>=0.104.0")
 
-### 6. additional_requirements
-5-10 non-functional requirements:
-- Performance expectations (response times, concurrent users)
-- Security requirements (authentication, data protection)
-- Integration constraints (APIs, external services)
-- Deployment considerations (containerization, hosting)
-- Any "must have" technical requirements from the user's description
+### 6. database (object)
+- **engine**: e.g., "PostgreSQL 15+"
+- **driver**: e.g., "asyncpg"
+- **migrations**: e.g., "Alembic"
+- **conventions**: Array of objects with "convention" and "rule" fields
 
-### 7. development_guidelines
-5-8 coding standards the agent should follow:
-- Error handling expectations
-- Testing requirements (unit tests, integration tests)
-- Code quality standards (TypeScript strict mode, linting)
-- Specific patterns to use or avoid
-- Documentation requirements
-
-### 8. implementation_roadmap
-6-10 phases ordered by DEPENDENCY (foundational first):
-1. Project setup and infrastructure (always first)
-2. Database/data layer setup
-3. Core backend/API development
-4. Core frontend components
-5. Main features (in dependency order)
-6. Secondary features
-7. Testing and polish (always last)
-
-Each phase needs:
-- phase: Name of the phase
-- status: Always "pending" for new projects
-- description: What this phase involves (1-2 sentences)
+### 7. environment (object)
+- **prerequisites**: Array of objects with "tool" and "version" fields
+- **env_variables**: Array of environment variable lines (e.g., "DATABASE_URL=postgresql+asyncpg://...")
 
 ## Critical Guidelines
 
 - Be SPECIFIC. The agent needs actionable details, not vague descriptions.
 - Cover ALL features from the user's description. Nothing should be omitted.
-- Order the roadmap by dependency. Database before API, API before UI.
 - Include enough detail that the agent can implement without clarification.
 - If the user didn't specify tech stack, recommend appropriate modern technologies.
 - The specification should be complete enough to build a production-ready MVP.
@@ -345,25 +581,25 @@ Each phase needs:
 ## Output Format
 
 You MUST output a valid JSON object wrapped in ```json ... ``` code blocks.
-The JSON must match this exact structure:
+The JSON must match this structure:
 
 ```json
 {{
   "project_name": "string",
-  "overview": "string",
-  "technology_stack": ["string", ...],
-  "core_capabilities": ["string", ...],
-  "implemented_features": [],
-  "additional_requirements": ["string", ...],
-  "development_guidelines": ["string", ...],
-  "implementation_roadmap": [
-    {{
-      "phase": "string",
-      "status": "pending",
-      "description": "string"
-    }},
+  "overview": {{
+    "summary": "string",
+    "success_criteria": ["string", ...],
+    "constraints": [{{"type": "string", "constraint": "string"}}, ...],
+    "out_of_scope": ["string", ...]
+  }},
+  "tech_stack": [
+    {{"layer": "Frontend", "technology": "React + TypeScript", "version": "18.x"}},
     ...
-  ]
+  ],
+  "frontend": {{ ... }},
+  "backend": {{ ... }},
+  "database": {{ ... }},
+  "environment": {{ ... }}
 }}
 ```
 
@@ -471,11 +707,11 @@ async def generate_spec_stream(
     technology_preferences: Optional[str] = None
 ) -> AsyncGenerator[str, None]:
     """
-    Generate app_spec.txt using Claude SDK with streaming.
+    Generate app_spec.md using Claude SDK with streaming.
 
     Yields SSE-formatted events:
     - data: {"type": "spec_progress", "content": "...", "phase": "..."}
-    - data: {"type": "spec_complete", "xml": "...", "project_name": "..."}
+    - data: {"type": "spec_complete", "markdown": "...", "project_name": "..."}
     - data: {"type": "spec_error", "error": "..."}
 
     Args:
@@ -521,9 +757,9 @@ async def generate_spec_stream(
                 # Build summary
                 try:
                     text_content = content.decode('utf-8')
-                    # Truncate if too long
-                    if len(text_content) > 5000:
-                        text_content = text_content[:5000] + "\n... (truncated)"
+                    # Truncate if too long (reduced to prevent timeout)
+                    if len(text_content) > 2000:
+                        text_content = text_content[:2000] + "\n... (truncated for spec generation, full file available later)"
                     context_parts.append(f"### {file.filename}\n```\n{text_content}\n```")
                 except UnicodeDecodeError:
                     context_parts.append(f"### {file.filename}\n(binary file, {len(content)} bytes)")
@@ -567,48 +803,147 @@ async def generate_spec_stream(
 
         # Collect response
         response_text = ""
+        
+        # Track timing for progress feedback
+        import asyncio
+        import time
+        start_time = time.time()
+        last_heartbeat = start_time
+        HEARTBEAT_INTERVAL = 5  # seconds
+        MAX_GENERATION_TIME = 300  # 5 minutes timeout (increased for large context)
 
         async with client:
-            # Send the query
-            await client.query(prompt)
+            # Send the query (this starts the generation)
+            query_task = asyncio.create_task(client.query(prompt))
+            
+            # Wait for query with periodic heartbeats
+            while not query_task.done():
+                try:
+                    await asyncio.wait_for(asyncio.shield(query_task), timeout=HEARTBEAT_INTERVAL)
+                except asyncio.TimeoutError:
+                    # Query still running, send heartbeat
+                    elapsed = int(time.time() - start_time)
+                    
+                    # Check for timeout
+                    if elapsed > MAX_GENERATION_TIME:
+                        query_task.cancel()
+                        yield format_sse_event("spec_error", {
+                            "error": f"Generation timed out after {elapsed}s. Please try again with fewer context files."
+                        })
+                        return
+                    
+                    # Send simple, honest heartbeat
+                    yield format_sse_event("spec_progress", {
+                        "content": f"Generating specification... ({elapsed}s)",
+                        "phase": "generating",
+                        "elapsed_seconds": elapsed
+                    })
+            
+            # Check if query raised an exception
+            if query_task.exception():
+                raise query_task.exception()
 
-            # Receive streaming response
-            async for msg in client.receive_response():
-                msg_type = type(msg).__name__
+            # Receive streaming response with heartbeats
+            # Use async iterator with timeout to send heartbeats while waiting
+            yield format_sse_event("spec_progress", {
+                "content": "Receiving response...",
+                "phase": "receiving",
+                "elapsed_seconds": int(time.time() - start_time)
+            })
+            
+            # Create async iterator from receive_response
+            response_iter = client.receive_response().__aiter__()
+            response_complete = False
+            pending_next = None  # Track pending __anext__ call
+            
+            while not response_complete:
+                try:
+                    # Create or reuse pending __anext__ call
+                    if pending_next is None:
+                        pending_next = asyncio.ensure_future(response_iter.__anext__())
+                    
+                    # Try to get next message with timeout
+                    msg = await asyncio.wait_for(
+                        asyncio.shield(pending_next),
+                        timeout=HEARTBEAT_INTERVAL
+                    )
+                    pending_next = None  # Clear after successful receive
+                    
+                    msg_type = type(msg).__name__
 
-                # Handle AssistantMessage (text content)
-                if msg_type == "AssistantMessage" and hasattr(msg, "content"):
-                    for block in msg.content:
-                        block_type = type(block).__name__
+                    # Handle AssistantMessage (text content)
+                    if msg_type == "AssistantMessage" and hasattr(msg, "content"):
+                        for block in msg.content:
+                            block_type = type(block).__name__
 
-                        if block_type == "TextBlock" and hasattr(block, "text"):
-                            response_text += block.text
+                            if block_type == "TextBlock" and hasattr(block, "text"):
+                                response_text += block.text
 
-                            # Send progress updates (truncated)
-                            preview = block.text[:100].replace('\n', ' ')
-                            if preview:
+                                # Send progress updates (truncated)
+                                preview = block.text[:100].replace('\n', ' ')
+                                if preview:
+                                    yield format_sse_event("spec_progress", {
+                                        "content": preview + "..." if len(block.text) > 100 else preview,
+                                        "phase": "generating",
+                                        "elapsed_seconds": int(time.time() - start_time)
+                                    })
+                                    
+                            elif block_type == "ThinkingBlock":
+                                # Claude is thinking - show thinking indicator
                                 yield format_sse_event("spec_progress", {
-                                    "content": preview + "..." if len(block.text) > 100 else preview,
-                                    "phase": "generating"
+                                    "content": "Claude is thinking...",
+                                    "phase": "thinking",
+                                    "elapsed_seconds": int(time.time() - start_time)
                                 })
 
-                # Handle ResultMessage (completion)
-                elif msg_type == "ResultMessage":
-                    logger.info("Spec generation completed")
+                    # Handle ResultMessage (completion)
+                    elif msg_type == "ResultMessage":
+                        elapsed = int(time.time() - start_time)
+                        yield format_sse_event("spec_progress", {
+                            "content": f"Completed in {elapsed}s",
+                            "phase": "complete",
+                            "elapsed_seconds": elapsed
+                        })
+                        logger.info(f"Spec generation completed in {elapsed}s")
+                        response_complete = True
+                        
+                except asyncio.TimeoutError:
+                    # No message received in HEARTBEAT_INTERVAL, send heartbeat
+                    elapsed = int(time.time() - start_time)
+                    
+                    # Check for overall timeout
+                    if elapsed > MAX_GENERATION_TIME:
+                        yield format_sse_event("spec_error", {
+                            "error": f"Generation timed out after {elapsed}s. Please try again."
+                        })
+                        return
+                    
+                    # Send simple, honest heartbeat
+                    yield format_sse_event("spec_progress", {
+                        "content": f"Generating specification... ({elapsed}s)",
+                        "phase": "generating",
+                        "elapsed_seconds": elapsed
+                    })
+                    
+                except StopAsyncIteration:
+                    # Iterator exhausted
+                    response_complete = True
 
         # Parse JSON from response
         spec_data = extract_json_from_response(response_text)
 
         if spec_data:
-            # Ensure implemented_features is empty for new projects
-            spec_data["implemented_features"] = []
+            # Convert to Markdown with section markers
+            markdown_content = spec_to_markdown(spec_data)
 
-            # Convert to XML
-            xml_content = spec_to_xml(spec_data)
+            # Analyze context strategy
+            context_strategy_result = analyze_context_strategy(context_files or [], markdown_content)
+            logger.info(f"Context strategy: {context_strategy_result['strategy']} - {context_strategy_result['reason']}")
 
             yield format_sse_event("spec_complete", {
-                "xml": xml_content,
-                "project_name": spec_data.get("project_name", "")
+                "markdown": markdown_content,
+                "project_name": spec_data.get("project_name", ""),
+                "context_strategy": context_strategy_result
             })
         else:
             # If JSON extraction failed, log the response for debugging
@@ -648,12 +983,12 @@ def generate_spec_sync(
 ) -> str:
     """
     Synchronous wrapper for generate_spec_stream.
-    Returns the final XML spec or raises an exception.
+    Returns the final markdown spec or raises an exception.
     """
     import asyncio
 
     async def run():
-        xml_result = None
+        markdown_result = None
         error = None
 
         async for event in generate_spec_stream(
@@ -665,15 +1000,15 @@ def generate_spec_sync(
             if event.startswith("data: "):
                 data = json.loads(event[6:].strip())
                 if data["type"] == "spec_complete":
-                    xml_result = data["xml"]
+                    markdown_result = data["markdown"]
                 elif data["type"] == "spec_error":
                     error = data["error"]
 
         if error:
             raise RuntimeError(error)
-        if not xml_result:
+        if not markdown_result:
             raise RuntimeError("No specification generated")
 
-        return xml_result
+        return markdown_result
 
     return asyncio.run(run())

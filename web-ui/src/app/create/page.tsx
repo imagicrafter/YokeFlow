@@ -33,6 +33,14 @@ export default function CreateProjectPage() {
   const [isGenerating, setIsGenerating] = useState(false);
   const [generationProgress, setGenerationProgress] = useState<string[]>([]);
   const [generatedSpec, setGeneratedSpec] = useState('');
+  const [validationResult, setValidationResult] = useState<{
+    valid: boolean;
+    errors: string[];
+    warnings: string[];
+    sections: Array<{ name: string; use_when?: string; depends_on?: string }>;
+  } | null>(null);
+  const [isValidating, setIsValidating] = useState(false);
+  const [contextStrategy, setContextStrategy] = useState<any>(null); // Strategy from spec generation
 
   const progressRef = useRef<HTMLDivElement>(null);
 
@@ -168,9 +176,15 @@ export default function CreateProjectPage() {
                   progressRef.current.scrollTop = progressRef.current.scrollHeight;
                 }
               } else if (data.type === 'spec_complete') {
-                setGeneratedSpec(data.xml);
+                setGeneratedSpec(data.markdown || data.xml); // Handle both new markdown and legacy xml
+                setValidationResult(null); // Reset validation when new spec generated
                 if (data.project_name && !projectName) {
                   setProjectName(data.project_name);
+                }
+                // Capture context strategy
+                if (data.context_strategy) {
+                  setContextStrategy(data.context_strategy);
+                  console.log('Context strategy:', data.context_strategy);
                 }
               } else if (data.type === 'spec_error') {
                 setError(data.error);
@@ -186,6 +200,31 @@ export default function CreateProjectPage() {
       setError(err.message || 'Failed to generate specification');
     } finally {
       setIsGenerating(false);
+    }
+  }
+
+  // ============================================================================
+  // Validation Handler
+  // ============================================================================
+
+  async function handleValidateSpec() {
+    if (!generatedSpec) return;
+
+    setIsValidating(true);
+    setError(null);
+
+    try {
+      const result = await api.validateSpec(generatedSpec);
+      setValidationResult(result);
+
+      if (!result.valid) {
+        setError(`Specification has ${result.errors.length} error(s) that must be fixed`);
+      }
+    } catch (err: any) {
+      console.error('Failed to validate spec:', err);
+      setError(err.message || 'Failed to validate specification');
+    } finally {
+      setIsValidating(false);
     }
   }
 
@@ -218,6 +257,26 @@ export default function CreateProjectPage() {
       return;
     }
 
+    // Validate generated spec before submission
+    if (mode === 'generate' && generatedSpec) {
+      setIsValidating(true);
+      try {
+        const result = await api.validateSpec(generatedSpec);
+        setValidationResult(result);
+
+        if (!result.valid) {
+          setError(`Please fix ${result.errors.length} validation error(s) before creating the project`);
+          setIsValidating(false);
+          return;
+        }
+      } catch (err: any) {
+        console.error('Validation failed:', err);
+        // Allow creation to continue if validation endpoint fails
+      } finally {
+        setIsValidating(false);
+      }
+    }
+
     setIsCreating(true);
 
     try {
@@ -238,7 +297,9 @@ export default function CreateProjectPage() {
         false,
         sandboxType,
         initializerModel,
-        codingModel
+        codingModel,
+        contextFiles, // Pass optional context files
+        contextStrategy // Pass context strategy from spec generation
       );
 
       router.push(`/projects/${result.id}`);
@@ -285,11 +346,10 @@ export default function CreateProjectPage() {
           type="button"
           onClick={() => setMode('upload')}
           disabled={isDisabled}
-          className={`flex-1 py-3 px-4 rounded-lg font-medium transition-colors ${
-            mode === 'upload'
-              ? 'bg-blue-600 text-white'
-              : 'bg-gray-800 text-gray-400 hover:bg-gray-700 hover:text-gray-300'
-          } ${isDisabled ? 'opacity-50 cursor-not-allowed' : ''}`}
+          className={`flex-1 py-3 px-4 rounded-lg font-medium transition-colors ${mode === 'upload'
+            ? 'bg-blue-600 text-white'
+            : 'bg-gray-800 text-gray-400 hover:bg-gray-700 hover:text-gray-300'
+            } ${isDisabled ? 'opacity-50 cursor-not-allowed' : ''}`}
         >
           Upload Spec File
         </button>
@@ -297,11 +357,10 @@ export default function CreateProjectPage() {
           type="button"
           onClick={() => setMode('generate')}
           disabled={isDisabled}
-          className={`flex-1 py-3 px-4 rounded-lg font-medium transition-colors ${
-            mode === 'generate'
-              ? 'bg-purple-600 text-white'
-              : 'bg-gray-800 text-gray-400 hover:bg-gray-700 hover:text-gray-300'
-          } ${isDisabled ? 'opacity-50 cursor-not-allowed' : ''}`}
+          className={`flex-1 py-3 px-4 rounded-lg font-medium transition-colors ${mode === 'generate'
+            ? 'bg-purple-600 text-white'
+            : 'bg-gray-800 text-gray-400 hover:bg-gray-700 hover:text-gray-300'
+            } ${isDisabled ? 'opacity-50 cursor-not-allowed' : ''}`}
         >
           Generate with AI
         </button>
@@ -327,9 +386,8 @@ export default function CreateProjectPage() {
               }
             }}
             placeholder="my-awesome-project"
-            className={`w-full px-4 py-3 bg-gray-900 border rounded-lg text-gray-100 placeholder-gray-500 focus:outline-none focus:ring-2 focus:border-transparent ${
-              nameValidationError ? 'border-red-500 focus:ring-red-500' : 'border-gray-800 focus:ring-blue-500'
-            }`}
+            className={`w-full px-4 py-3 bg-gray-900 border rounded-lg text-gray-100 placeholder-gray-500 focus:outline-none focus:ring-2 focus:border-transparent ${nameValidationError ? 'border-red-500 focus:ring-red-500' : 'border-gray-800 focus:ring-blue-500'
+              }`}
             disabled={isDisabled}
           />
           {nameValidationError ? (
@@ -518,25 +576,40 @@ export default function CreateProjectPage() {
             )}
 
             {/* Generation Progress */}
+            {/* Progress Display */}
             {(isGenerating || generationProgress.length > 0) && !generatedSpec && (
               <div className="p-4 bg-gray-900 border border-gray-800 rounded-lg">
-                <div className="text-sm font-medium text-gray-300 mb-2">Generation Progress</div>
+                <div className="flex items-center justify-between mb-3">
+                  <div className="text-sm font-medium text-gray-300">Generation Progress</div>
+                  <div className="text-xs text-gray-500">Usually takes 1-2 minutes</div>
+                </div>
+
+                {/* Current Status - Claude Code style */}
+                {isGenerating && generationProgress.length > 0 && (
+                  <div className="mb-3 p-3 bg-purple-900/20 border border-purple-800/30 rounded-lg">
+                    <div className="flex items-center gap-3">
+                      <div className="relative">
+                        <span className="inline-block w-2 h-2 bg-purple-500 rounded-full animate-pulse"></span>
+                        <span className="absolute top-0 left-0 w-2 h-2 bg-purple-500 rounded-full animate-ping opacity-75"></span>
+                      </div>
+                      <span className="text-purple-300 font-medium">
+                        {generationProgress[generationProgress.length - 1]}
+                      </span>
+                    </div>
+                  </div>
+                )}
+
+                {/* Progress History */}
                 <div
                   ref={progressRef}
-                  className="max-h-32 overflow-y-auto text-sm text-gray-400 space-y-1"
+                  className="max-h-24 overflow-y-auto text-sm text-gray-500 space-y-1"
                 >
-                  {generationProgress.map((msg, i) => (
-                    <div key={i} className="flex items-start gap-2">
-                      <span className="text-purple-400">›</span>
+                  {generationProgress.slice(0, -1).map((msg, i) => (
+                    <div key={i} className="flex items-start gap-2 opacity-60">
+                      <span className="text-gray-600">✓</span>
                       <span>{msg}</span>
                     </div>
                   ))}
-                  {isGenerating && (
-                    <div className="flex items-center gap-2 text-purple-400">
-                      <span className="animate-pulse">●</span>
-                      <span>Processing...</span>
-                    </div>
-                  )}
                 </div>
               </div>
             )}
@@ -562,14 +635,67 @@ export default function CreateProjectPage() {
                 </div>
                 <textarea
                   value={generatedSpec}
-                  onChange={(e) => setGeneratedSpec(e.target.value)}
+                  onChange={(e) => {
+                    setGeneratedSpec(e.target.value);
+                    setValidationResult(null); // Reset validation when content changes
+                  }}
                   rows={15}
                   className="w-full px-4 py-3 bg-gray-900 border border-gray-800 rounded-lg text-gray-100 font-mono text-sm focus:outline-none focus:ring-2 focus:ring-purple-500 focus:border-transparent resize-y"
                   disabled={isDisabled}
                 />
-                <p className="mt-1 text-sm text-gray-500">
-                  Review and edit the specification before creating the project
-                </p>
+                <div className="mt-2 flex items-center justify-between">
+                  <p className="text-sm text-gray-500">
+                    Review and edit the specification before creating the project
+                  </p>
+                  <button
+                    type="button"
+                    onClick={handleValidateSpec}
+                    disabled={isValidating || isDisabled}
+                    className="px-3 py-1 bg-purple-700 hover:bg-purple-600 disabled:bg-purple-900 disabled:cursor-not-allowed text-white text-sm rounded transition-colors"
+                  >
+                    {isValidating ? 'Validating...' : 'Validate'}
+                  </button>
+                </div>
+
+                {/* Validation Results */}
+                {validationResult && (
+                  <div className={`mt-3 p-3 rounded-lg border ${validationResult.valid
+                    ? 'bg-green-950/30 border-green-900/50'
+                    : 'bg-red-950/30 border-red-900/50'
+                    }`}>
+                    {validationResult.valid ? (
+                      <div className="text-green-400 text-sm">
+                        ✅ Specification is valid ({validationResult.sections.length} sections found)
+                      </div>
+                    ) : (
+                      <div>
+                        <div className="text-red-400 text-sm font-medium mb-2">
+                          ❌ {validationResult.errors.length} validation error(s):
+                        </div>
+                        <ul className="text-red-300 text-sm space-y-1">
+                          {validationResult.errors.map((error, i) => (
+                            <li key={i}>• {error}</li>
+                          ))}
+                        </ul>
+                      </div>
+                    )}
+                    {validationResult.warnings.length > 0 && (
+                      <div className="mt-2">
+                        <div className="text-yellow-400 text-sm font-medium mb-1">
+                          ⚠️ {validationResult.warnings.length} warning(s):
+                        </div>
+                        <ul className="text-yellow-300 text-sm space-y-1">
+                          {validationResult.warnings.slice(0, 5).map((warning, i) => (
+                            <li key={i}>• {warning}</li>
+                          ))}
+                          {validationResult.warnings.length > 5 && (
+                            <li className="text-gray-400">...and {validationResult.warnings.length - 5} more</li>
+                          )}
+                        </ul>
+                      </div>
+                    )}
+                  </div>
+                )}
               </div>
             )}
           </>
